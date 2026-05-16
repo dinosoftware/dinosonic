@@ -39,6 +39,7 @@ import {
     getTranscodingProfile,
     updateTranscodingProfile,
 } from '../../TranscodingProfileManager.ts';
+import { getAnalysisStatus, healthCheck, startAnalysis } from '../../AudioMuse.ts';
 const api = new Hono();
 
 api.get('/public-stream/:shareId/:itemId', async (c: Context) => {
@@ -860,6 +861,36 @@ api.delete('/api-keys/:keyPreview', async (c: Context) => {
     logger.info(`Revoked API key for user: ${user.subsonic.username}`);
 
     return c.json({ success: true, message: 'API key revoked successfully' });
+});
+
+api.get('/audio-similarity/status', async (c: Context) => {
+    if (!config.audio_similarity?.enabled || !config.audio_similarity.audiomuse_url) {
+        return c.json({ enabled: false });
+    }
+
+    const isHealthy = await healthCheck();
+    if (!isHealthy) {
+        return c.json({ enabled: true, connected: false, analysis: null });
+    }
+
+    const analysis = await getAnalysisStatus();
+    return c.json({ enabled: true, connected: true, analysis });
+});
+
+api.post('/audio-similarity/start-analysis', async (c: Context) => {
+    const sessionUser = c.get('user') as { user: SubsonicUser; exp: number };
+    if (!sessionUser.user.adminRole) return c.json({ error: 'Unauthorized' }, 403);
+
+    if (!config.audio_similarity?.enabled || !config.audio_similarity.audiomuse_url) {
+        return c.json({ error: 'Audio similarity is not enabled' }, 400);
+    }
+
+    const taskId = await startAnalysis();
+    if (!taskId) {
+        return c.json({ error: 'Failed to start analysis' }, 500);
+    }
+
+    return c.json({ message: 'Analysis started', task_id: taskId });
 });
 
 export default api;

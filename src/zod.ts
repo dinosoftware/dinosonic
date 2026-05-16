@@ -31,6 +31,15 @@ export const TranscodingProfileSchema = z.object({
     enabled: z.boolean().default(true),
 });
 
+export const ConfigAudioSimilarityOptionSchema = z.object({
+    enabled: z.boolean().default(false),
+    audiomuse_url: z.string().optional(),
+    api_token: z.string().optional(),
+}).refine((data) => !data.enabled || data.audiomuse_url, {
+    message: 'AudioMuse URL is required when audio similarity is enabled',
+    path: ['audiomuse_url'],
+});
+
 export const ConfigTranscodingOptionSchema = z.object({
     enabled: z.boolean().default(true),
     ffmpeg_path: z.string().default('ffmpeg'),
@@ -75,6 +84,7 @@ export const ConfigSchema = z.object({
     data_folder: z.string(),
     ui_folder: z.string().optional(),
     transcoding: ConfigTranscodingOptionSchema.default({ enabled: true, ffmpeg_path: 'ffmpeg' }),
+    audio_similarity: ConfigAudioSimilarityOptionSchema.default({ enabled: false }),
     last_fm: ConfigLastFMOptionSchema.optional(),
     listenbrainz: ConfigListenBrainzOptionSchema.optional(),
     musicbrainz: ConfigMusicBrainzOptionSchema.optional(),
@@ -366,6 +376,7 @@ export const InternetRadioStationSchema = z.object({
 export type userData = z.infer<typeof userDataSchema>;
 export type CoverArt = z.infer<typeof CoverArtSchema>;
 export type TranscodingProfile = z.infer<typeof TranscodingProfileSchema>;
+export type ConfigAudioSimilarityOption = z.infer<typeof ConfigAudioSimilarityOptionSchema>;
 export type ConfigTranscodingOption = z.infer<typeof ConfigTranscodingOptionSchema>;
 export type ConfigLastFMOption = z.infer<typeof ConfigLastFMOptionSchema>;
 export type Config = z.infer<typeof ConfigSchema>;

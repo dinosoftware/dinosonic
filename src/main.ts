@@ -38,7 +38,7 @@ if (Deno.args.length) {
         alias: { help: 'h', version: 'v', config: 'c' },
         unknown: (arg) => {
             console.error(
-                `Unknown option "${arg}". try running "denosonic -h" for help.`,
+                `Unknown option "${arg}". try running "dinosonic -h" for help.`,
             );
             Deno.exit(127);
         },
@@ -93,6 +93,9 @@ if (configFile) {
         listenbrainz_scrobbling: Deno.env.get('DINO_LISTENBRAINZ_SCROBBLING'),
         transcoding_enabled: Deno.env.get('DINO_TRANSCODING_ENABLED'),
         ffmpeg_path: Deno.env.get('DINO_FFMPEG_PATH'),
+        audio_similarity_enabled: Deno.env.get('DINO_AUDIO_SIMILARITY_ENABLED'),
+        audiomuse_url: Deno.env.get('DINO_AUDIOMUSE_URL'),
+        audiomuse_api_token: Deno.env.get('DINO_AUDIOMUSE_API_TOKEN'),
     };
 
     const conf: Config = {
@@ -143,6 +146,14 @@ if (configFile) {
         conf.transcoding = {
             enabled: typeof envVars.transcoding_enabled === 'string' ? envVars.transcoding_enabled === 'true' : true,
             ffmpeg_path: envVars.ffmpeg_path || 'ffmpeg',
+        };
+    }
+
+    if (envVars.audio_similarity_enabled === 'true' || envVars.audiomuse_url) {
+        conf.audio_similarity = {
+            enabled: envVars.audio_similarity_enabled === 'true',
+            audiomuse_url: envVars.audiomuse_url,
+            api_token: envVars.audiomuse_api_token,
         };
     }
 
@@ -396,7 +407,7 @@ app.get('/share/:shareId', async (c: Context) => {
             }
 
             const cacheDir = path.join(config.data_folder, 'cache', 'cover_shares');
-            await Deno.mkdir(cacheDir, { recursive: true }).catch(() => {});
+            await Deno.mkdir(cacheDir, { recursive: true }).catch(() => { });
 
             const ext = cover.mimeType.split('/')[1] || 'jpg';
             const cachedPath = path.join(cacheDir, `${share.itemId}_${size}.${ext}`);
@@ -451,8 +462,7 @@ app.get('/share/:shareId', async (c: Context) => {
             item = item as Album;
             metaTitle = `${item.subsonic.name || 'Album'} by ${item.subsonic.artist || 'Unknown Artist'}`;
             metaDescription = share.description ||
-                `Check out the album "${item.subsonic.name}" by ${
-                    item.subsonic.artist || 'Unknown Artist'
+                `Check out the album "${item.subsonic.name}" by ${item.subsonic.artist || 'Unknown Artist'
                 } on Dinosonic. Shared by ${ownerUsername}.`;
             if (item.subsonic.coverArt) metaImageUrl = `${baseUrl}/api/public-cover/${item.subsonic.coverArt}?size=600`;
             metaOgType = 'music.album';
