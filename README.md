@@ -42,6 +42,7 @@
 - **Custom Web Frontend Support** – Serve any plain HTML, CSS, and JS frontend from the ui/ folder.
 - **Docker Support** – Easy deployment with environment variables and docker-compose.
 - **Standalone Executable** – Runs as a single executable with no external runtime dependencies (once compiled).
+- **Sonic Similarity** – Audio-based song similarity and pathfinding via AudioMuse-AI integration (OpenSubsonic `sonicSimilarity` extension).
 
 ## Installation
 
@@ -106,6 +107,10 @@ services:
             # Optional Transcoding configuration
             # DINO_TRANSCODING_ENABLED: false
             # DINO_FFMPEG_PATH: ffmpeg
+            # Optional Audio Similarity (requires AudioMuse-AI)
+            # DINO_AUDIO_SIMILARITY_ENABLED: true
+            # DINO_AUDIOMUSE_URL: http://audiomuse:8000
+            # DINO_AUDIOMUSE_API_TOKEN: your_audiomuse_api_token
 ```
 
 #### Environment Variables
@@ -133,6 +138,9 @@ services:
 | `DINO_LISTENBRAINZ_SCROBBLING` | Enable ListenBrainz scrobbling (`true`/`false`). Tokens set per-user in admin panel.       | `false`         |
 | `DINO_TRANSCODING_ENABLED`     | Enable FFmpeg-based transcoding for streaming and cover art resizing (`true`/`false`).     | `false`         |
 | `DINO_FFMPEG_PATH`             | Path to `ffmpeg` binary.                                                                   | `ffmpeg`        |
+| `DINO_AUDIO_SIMILARITY_ENABLED`| Enable audio-based similarity via AudioMuse-AI (`true`/`false`).                           | `false`         |
+| `DINO_AUDIOMUSE_URL`           | AudioMuse-AI server URL. \*Required if `DINO_AUDIO_SIMILARITY_ENABLED` is true.            | _None\*_        |
+| `DINO_AUDIOMUSE_API_TOKEN`     | AudioMuse-AI API token (Bearer auth). \*Required when AudioMuse auth is enabled.           | _None\*_        |
 
 ---
 
@@ -227,6 +235,11 @@ client_secret = "your_spotify_client_secret"
 
 [listenbrainz]
 enable_scrobbling = false # For ListenBrainz scrobbling (tokens set per-user in admin panel)
+
+[audio_similarity]
+enabled = false # For audio-based song similarity (requires AudioMuse-AI)
+audiomuse_url = "http://localhost:8000" # URL of your AudioMuse-AI instance
+api_token = "your_audiomuse_api_token" # Required when AudioMuse auth is enabled
 ```
 
 #### Config File Options
@@ -280,13 +293,21 @@ enable_scrobbling = false # For ListenBrainz scrobbling (tokens set per-user in 
 | ------------------- | ------- | ------- | ---------------------------------------------------------------------- |
 | `enable_scrobbling` | boolean | `false` | Enable ListenBrainz scrobbling. User tokens configured in admin panel. |
 
+#### Audio Similarity Options (`[audio_similarity]`)
+
+| Option          | Type    | Default  | Description                                                                 |
+| --------------- | ------- | -------- | --------------------------------------------------------------------------- |
+| `enabled`       | boolean | `false`  | Enable audio-based song similarity and pathfinding via AudioMuse-AI.        |
+| `audiomuse_url` | string  | _None\*_ | URL of the AudioMuse-AI instance. \*Required if `enabled` is true.          |
+| `api_token`     | string  | _None\*_ | AudioMuse-AI API token for Bearer auth. Required when AudioMuse auth is on. |
+
 </details>
 
 ---
 
 ## API & Admin Panel
 
-- **Subsonic API** – Compatible with existing Subsonic clients. Key OpenSubsonic extensions like `formPost`, `songLyrics`, and `transcodeOffset` are supported.
+- **Subsonic API** – Compatible with existing Subsonic clients. Key OpenSubsonic extensions like `formPost`, `songLyrics`, `transcodeOffset`, and `sonicSimilarity` are supported.
 - **API Keys** – Generate persistent API keys as an alternative to password authentication:
   - Create named API keys from the admin dashboard
   - View full API keys anytime (not one-time-only)

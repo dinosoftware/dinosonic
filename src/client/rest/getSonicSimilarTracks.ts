@@ -29,25 +29,13 @@ async function handleGetSonicSimilarTracks(c: Context) {
 
     const similarResults = await getSimilarTracks(id, count);
 
-    const seedSong = songParse.data;
-    const seedSongSubsonic = { ...seedSong.subsonic };
+    const seenIds = new Set([id]);
 
-    const seedUserTrackData = (await database.get(['userData', user.backend.id, 'track', seedSong.subsonic.id])).value as userData | undefined;
-    if (seedUserTrackData) {
-        if (seedUserTrackData.starred) seedSongSubsonic.starred = seedUserTrackData.starred.toISOString();
-        if (seedUserTrackData.played) seedSongSubsonic.played = seedUserTrackData.played.toISOString();
-        if (seedUserTrackData.playCount) seedSongSubsonic.playCount = seedUserTrackData.playCount;
-        if (seedUserTrackData.userRating) seedSongSubsonic.userRating = seedUserTrackData.userRating;
-    }
-
-    const sonicMatches = [
-        {
-            entry: seedSongSubsonic,
-            similarity: 1.0,
-        },
-    ];
+    const sonicMatches = [];
 
     for (const result of similarResults) {
+        if (seenIds.has(result.trackId)) continue;
+        seenIds.add(result.trackId);
         const similarTrackEntry = await database.get(['tracks', result.trackId]);
         if (!similarTrackEntry.value) continue;
 
