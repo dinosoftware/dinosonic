@@ -234,9 +234,18 @@ steps:
     environment:
       GITHUB_TOKEN: { from_secret: github_token }
 
+  generate-docker-tags:
+    image: alpine
+    depends_on: [verify-sync]
+    when:
+      evaluate: 'BUILD_DOCKER == "true"'
+    commands:
+      - echo "latest" > .tags
+      - echo "v$VERSION" >> .tags
+
   docker-build-primary:
     image: woodpeckerci/plugin-docker-buildx
-    depends_on: [verify-sync]
+    depends_on: [generate-docker-tags]
     when:
       evaluate: 'BUILD_DOCKER == "true"'
     privileged: true
@@ -244,7 +253,6 @@ steps:
       repo: git.fuge.dev/${CI_REPO}
       platforms: linux/amd64,linux/arm64
       build_args: ["app_version=$VERSION"]
-      tags: ["v$VERSION", "latest"]
       registry: git.fuge.dev
       username: dinosoftware
       password:
