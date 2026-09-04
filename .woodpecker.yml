@@ -6,28 +6,31 @@ steps:
     image: alpine/curl
     commands:
       - |
-        COMMIT=${CI_COMMIT_SHA}
+        COMMIT=$CI_COMMIT_SHA
+
         echo "Checking Forgejo..."
-        FORGEJO=$(curl -s -o /dev/null -w "%{http_code}" \
+        FORGEJO=$$(curl -s -o /dev/null -w "%{http_code}" \
           -H "Authorization: token $FORGEJO_TOKEN" \
-          "https://git.fuge.dev/api/v1/repos/${CI_REPO}/git/commits/$COMMIT")
+          "https://git.fuge.dev/api/v1/repos/${CI_REPO}/git/commits/$$COMMIT")
 
         echo "Checking Codeberg..."
-        CODEBERG=$(curl -s -o /dev/null -w "%{http_code}" \
+        CODEBERG=$$(curl -s -o /dev/null -w "%{http_code}" \
           -H "Authorization: token $CODEBERG_TOKEN" \
-          "https://codeberg.org/api/v1/repos/${CI_REPO}/git/commits/$COMMIT")
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/git/commits/$$COMMIT")
 
         echo "Checking GitHub..."
-        GITHUB=$(curl -s -o /dev/null -w "%{http_code}" \
+        GITHUB=$$(curl -s -o /dev/null -w "%{http_code}" \
           -H "Authorization: token $GITHUB_TOKEN" \
-          "https://api.github.com/repos/${CI_REPO}/commits/$COMMIT")
+          "https://api.github.com/repos/${CI_REPO}/commits/$$COMMIT")
 
-        echo "Forgejo: $FORGEJO | Codeberg: $CODEBERG | GitHub: $GITHUB"
+        echo "Forgejo: $$FORGEJO | Codeberg: $$CODEBERG | GitHub: $$GITHUB"
 
-        if [ "$FORGEJO" != "200" ] || [ "$CODEBERG" != "200" ] || [ "$GITHUB" != "200" ]; then
+        if [ "$$FORGEJO" != "200" ] || [ "$$CODEBERG" != "200" ] || [ "$$GITHUB" != "200" ]; then
           echo "ERROR: Mirrors not in sync. Aborting."
           exit 1
         fi
+
+        echo "All mirrors in sync. Proceeding."
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
       CODEBERG_TOKEN: { from_secret: codeberg_token }
@@ -39,44 +42,80 @@ steps:
     when:
       evaluate: 'BINARY_BUILD == "true"'
     commands:
+      - apk add --no-cache jq
       - |
+        # Forgejo/Codeberg Payload
+        jq -n \
+          --arg tag "v${VERSION}" \
+          --arg name "v${VERSION}" \
+          --arg target "${CI_COMMIT_SHA}" \
+          '{tag_name: $$tag, name: $$name, target: $$target, draft: true}' > payload.json
+
+        # GitHub Payload
+        jq -n \
+          --arg tag "v${VERSION}" \
+          --arg name "v${VERSION}" \
+          --arg target "${CI_COMMIT_SHA}" \
+          '{tag_name: $$tag, name: $$name, target_commitish: $$target, draft: true}' > github_payload.json
+
         # FORGEJO
         echo "Creating draft release on Forgejo..."
-        RESP_FJ=$(curl -s -X POST \
+        RESP_FJ=$$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $FORGEJO_TOKEN" \
           -H "Content-Type: application/json" \
-          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          -d @payload.json \
           "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases")
-        FJ_ID=$(echo "$RESP_FJ" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
-        if [ -z "$FJ_ID" ] || [ "$FJ_ID" = "null" ]; then echo "FORGEJO ERROR: $RESP_FJ"; exit 1; fi
-        echo "$FJ_ID" > .forgejo_id
-        echo "Forgejo ID: $FJ_ID"
+
+        HTTP_CODE=$$(echo "$$RESP_FJ" | tail -1)
+        RESP_BODY=$$(echo "$$RESP_FJ" | sed '$$d')
+        FJ_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+
+        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$FJ_ID" = "null" ]; then
+          echo "FORGEJO ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+          exit 1
+        fi
+        echo "$$FJ_ID" > .forgejo_id
+        echo "Forgejo Release ID: $$FJ_ID"
 
         # CODEBERG
         echo "Creating draft release on Codeberg..."
-        RESP_CB=$(curl -s -X POST \
+        RESP_CB=$$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $CODEBERG_TOKEN" \
           -H "Content-Type: application/json" \
-          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          -d @payload.json \
           "https://codeberg.org/api/v1/repos/${CI_REPO}/releases")
-        CB_ID=$(echo "$RESP_CB" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
-        if [ -z "$CB_ID" ] || [ "$CB_ID" = "null" ]; then echo "CODEBERG ERROR: $RESP_CB"; exit 1; fi
-        echo "$CB_ID" > .codeberg_id
-        echo "Codeberg ID: $CB_ID"
+
+        HTTP_CODE=$$(echo "$$RESP_CB" | tail -1)
+        RESP_BODY=$$(echo "$$RESP_CB" | sed '$$d')
+        CB_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+
+        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$CB_ID" = "null" ]; then
+          echo "CODEBERG ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+          exit 1
+        fi
+        echo "$$CB_ID" > .codeberg_id
+        echo "Codeberg Release ID: $$CB_ID"
 
         # GITHUB
         echo "Creating draft release on GitHub..."
-        RESP_GH=$(curl -s -X POST \
+        RESP_GH=$$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
-          -A "Woodpecker-CI-Curl" \
+          -A "Woodpecker-CI" \
           -H "Content-Type: application/json" \
-          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target_commitish\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          -d @github_payload.json \
           "https://api.github.com/repos/${CI_REPO}/releases")
-        GH_ID=$(echo "$RESP_GH" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
-        if [ -z "$GH_ID" ] || [ "$GH_ID" = "null" ]; then echo "GITHUB ERROR: $RESP_GH"; exit 1; fi
-        echo "$GH_ID" > .github_id
-        echo "GitHub ID: $GH_ID"
+
+        HTTP_CODE=$$(echo "$$RESP_GH" | tail -1)
+        RESP_BODY=$$(echo "$$RESP_GH" | sed '$$d')
+        GH_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+
+        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$GH_ID" = "null" ]; then
+          echo "GITHUB ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+          exit 1
+        fi
+        echo "$$GH_ID" > .github_id
+        echo "GitHub Release ID: $$GH_ID"
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
       CODEBERG_TOKEN: { from_secret: codeberg_token }
@@ -99,15 +138,26 @@ steps:
     depends_on: [build-binaries]
     when:
       evaluate: 'BINARY_BUILD == "true"'
+      status: [success]
     commands:
       - |
-        RELEASE_ID=$(cat .forgejo_id)
+        urlencode() { printf '%s' "$$1" | sed 's/ /%20/g; s/!/%21/g; s/#/%23/g; s/\$/%24/g; s/\&/%26/g; s/'"'"'/%27/g; s/(/%28/g; s/)/%29/g; s/+/%2B/g; s/,/%2C/g; s/:/%3A/g; s/;/%3B/g; s/=/%3D/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\]/%5D/g'; }
+        RELEASE_ID=$$(cat .forgejo_id)
+
         for FILE in dist/*; do
-          curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" -F "attachment=@$FILE" \
-            "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID/assets"
+          [ -d "$$FILE" ] && continue
+          FILENAME=$$(basename "$$FILE")
+          echo "Uploading $$FILENAME to Forgejo..."
+          curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" \
+            -F "attachment=@$$FILE" \
+            "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$$RELEASE_ID/assets?name=$$(urlencode "$$FILENAME")"
         done
-        curl -s -X PATCH -H "Authorization: token $FORGEJO_TOKEN" -H "Content-Type: application/json" \
-          -d "{\"draft\": false}" "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID"
+
+        echo "Publishing release..."
+        curl -s -X PATCH -H "Authorization: token $FORGEJO_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"draft\": false}" \
+          "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$$RELEASE_ID"
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
 
@@ -116,15 +166,39 @@ steps:
     depends_on: [build-binaries]
     when:
       evaluate: 'BINARY_BUILD == "true"'
+      status: [success]
     commands:
       - |
-        RELEASE_ID=$(cat .codeberg_id)
+        urlencode() { printf '%s' "$$1" | sed 's/ /%20/g; s/!/%21/g; s/#/%23/g; s/\$/%24/g; s/\&/%26/g; s/'"'"'/%27/g; s/(/%28/g; s/)/%29/g; s/+/%2B/g; s/,/%2C/g; s/:/%3A/g; s/;/%3B/g; s/=/%3D/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\]/%5D/g'; }
+        RELEASE_ID=$$(cat .codeberg_id)
+
         for FILE in dist/*; do
-          curl -s -X POST -H "Authorization: token $CODEBERG_TOKEN" -F "attachment=@$FILE" \
-            "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID/assets"
+          [ -d "$$FILE" ] && continue
+          FILENAME=$$(basename "$$FILE")
+          echo "Uploading $$FILENAME to Codeberg..."
+
+          # 3-Attempt Retry Mechanism
+          for ATTEMPT in 1 2 3; do
+            RESP=$$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Authorization: token $CODEBERG_TOKEN" \
+              -F "attachment=@$$FILE" \
+              "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$$RELEASE_ID/assets?name=$$(urlencode "$$FILENAME")")
+            
+            HTTP_CODE=$$(echo "$$RESP" | tail -1)
+            if [ "$$HTTP_CODE" -ge 200 ] && [ "$$HTTP_CODE" -lt 300 ]; then
+              echo "  Uploaded successfully."
+              break
+            fi
+            echo "  Attempt $$ATTEMPT failed (HTTP $$HTTP_CODE). Retrying in 5s..."
+            sleep 5
+          done
         done
-        curl -s -X PATCH -H "Authorization: token $CODEBERG_TOKEN" -H "Content-Type: application/json" \
-          -d "{\"draft\": false}" "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID"
+
+        echo "Publishing release..."
+        curl -s -X PATCH -H "Authorization: token $CODEBERG_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"draft\": false}" \
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$$RELEASE_ID"
     environment:
       CODEBERG_TOKEN: { from_secret: codeberg_token }
 
@@ -133,17 +207,30 @@ steps:
     depends_on: [build-binaries]
     when:
       evaluate: 'BINARY_BUILD == "true"'
+      status: [success]
     commands:
       - |
-        RELEASE_ID=$(cat .github_id)
+        urlencode() { printf '%s' "$$1" | sed 's/ /%20/g; s/!/%21/g; s/#/%23/g; s/\$/%24/g; s/\&/%26/g; s/'"'"'/%27/g; s/(/%28/g; s/)/%29/g; s/+/%2B/g; s/,/%2C/g; s/:/%3A/g; s/;/%3B/g; s/=/%3D/g; s/?/%3F/g; s/@/%40/g; s/\[/%5B/g; s/\]/%5D/g'; }
+        RELEASE_ID=$$(cat .github_id)
+
         for FILE in dist/*; do
-          FILENAME=$(basename $FILE)
-          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" \
-            "https://uploads.github.com/repos/${CI_REPO}/releases/$RELEASE_ID/assets?name=$FILENAME" \
-            --data-binary "@$FILE"
+          [ -d "$$FILE" ] && continue
+          FILENAME=$$(basename "$$FILE")
+          echo "Uploading $$FILENAME to GitHub..."
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/octet-stream" \
+            "https://uploads.github.com/repos/${CI_REPO}/releases/$$RELEASE_ID/assets?name=$$(urlencode "$$FILENAME")" \
+            --data-binary "@$$FILE"
         done
-        curl -s -X PATCH -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
-          -d "{\"draft\": false}" "https://api.github.com/repos/${CI_REPO}/releases/$RELEASE_ID"
+
+        echo "Publishing release..."
+        curl -s -X PATCH \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -d "{\"draft\": false}" \
+          "https://api.github.com/repos/${CI_REPO}/releases/$$RELEASE_ID"
     environment:
       GITHUB_TOKEN: { from_secret: github_token }
 
@@ -169,16 +256,19 @@ steps:
       evaluate: 'BUILD_DOCKER == "true"'
     commands:
       - |
+        REPO_LOWER=$$(echo "${CI_REPO}" | tr '[:upper:]' '[:lower:]')
+
         # GHCR Sync
         skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/${CI_REPO}:latest docker://ghcr.io/${CI_REPO}:latest
+          docker://git.fuge.dev/$$REPO_LOWER:latest docker://ghcr.io/$$REPO_LOWER:latest
         skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/${CI_REPO}:v${VERSION} docker://ghcr.io/${CI_REPO}:v${VERSION}
+          docker://git.fuge.dev/$$REPO_LOWER:v${VERSION} docker://ghcr.io/$$REPO_LOWER:v${VERSION}
+
         # Codeberg Sync
         skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/${CI_REPO}:latest docker://codeberg.org/${CI_REPO}:latest
+          docker://git.fuge.dev/$$REPO_LOWER:latest docker://codeberg.org/$$REPO_LOWER:latest
         skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/${CI_REPO}:v${VERSION} docker://codeberg.org/${CI_REPO}:v${VERSION}
+          docker://git.fuge.dev/$$REPO_LOWER:v${VERSION} docker://codeberg.org/$$REPO_LOWER:v${VERSION}
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
       GITHUB_TOKEN: { from_secret: github_token }
