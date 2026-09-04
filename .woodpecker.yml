@@ -122,7 +122,7 @@ steps:
       GITHUB_TOKEN: { from_secret: github_token }
 
   build-binaries:
-    image: denoland/deno:latest
+    image: denoland/deno:alpine
     depends_on: [create-tag]
     when:
       evaluate: 'BINARY_BUILD == "true"'
@@ -243,11 +243,12 @@ steps:
     settings:
       repo: git.fuge.dev/${CI_REPO}
       platforms: linux/amd64,linux/arm64
-      build_args: ["app_version=${VERSION}"]
-      tags: ["v${VERSION}", "latest"]
+      build_args: ["app_version=$VERSION"]
+      tags: ["v$VERSION", "latest"]
       registry: git.fuge.dev
       username: dinosoftware
-      password: { from_secret: forgejo_token }
+      password:
+        from_secret: forgejo_token
 
   docker-sync-mirrors:
     image: quay.io/skopeo/stable:latest
