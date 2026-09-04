@@ -39,30 +39,64 @@ async function serveFile(c: Context, filePath: string, contentType: string) {
 
         await file.seek(start, Deno.SeekMode.Start);
 
+        let bytesRemaining = contentLength;
+        let closed = false;
+        const closeFile = () => {
+            if (closed) return;
+            closed = true;
+            try {
+                file.close();
+            } catch {
+                // already closed, ignore
+            }
+        };
+
         const readable = new ReadableStream({
             async pull(controller) {
-                if (controller.desiredSize === null) {
-                    file.close();
-                    return;
+                if (closed) return;
+
+                if (bytesRemaining <= 0) {
+                    try {
+                        controller.close();
+                    } catch {
+                        // already closed/cancelled, ignore
+                    }
+                    return closeFile();
                 }
 
-                const buffer = new Uint8Array(64 * 1024);
+                const chunkSize = Math.min(64 * 1024, bytesRemaining);
+                const buffer = new Uint8Array(chunkSize);
                 try {
                     const bytesRead = await file.read(buffer);
+
+                    // The request may have been cancelled while we were awaiting the read
+                    if (closed) return;
+
                     if (bytesRead === null || bytesRead === 0) {
-                        controller.close();
-                        file.close();
-                        return;
+                        try {
+                            controller.close();
+                        } catch {
+                            // already closed/cancelled, ignore
+                        }
+                        return closeFile();
                     }
+
+                    bytesRemaining -= bytesRead;
                     controller.enqueue(buffer.subarray(0, bytesRead));
                 } catch (e) {
-                    logger.error(`Error reading file stream for ${filePath}: ${e}`);
-                    controller.error(e);
-                    file.close();
+                    if (!closed) {
+                        logger.error(`Error reading file stream for ${filePath}: ${e}`);
+                        try {
+                            controller.error(e);
+                        } catch {
+                            // already closed/cancelled, ignore
+                        }
+                    }
+                    return closeFile();
                 }
             },
             cancel() {
-                file.close();
+                return closeFile();
             },
         });
 

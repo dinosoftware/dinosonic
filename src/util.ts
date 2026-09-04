@@ -5,11 +5,14 @@ import { Context } from '@hono/hono';
 import { type Config, Playlist, Share, type SubsonicUser, type User, UserSchema } from './zod.ts';
 import * as log from '@std/log';
 import { blue, bold, gray, red, yellow } from '@std/fmt/colors';
+import * as path from '@std/path';
 import { existsSync } from 'node:fs';
 
 const SERVER_NAME = 'Dinosonic';
 const API_VERSION = '1.16.1';
-export const SERVER_VERSION = '0.7.7';
+export const SERVER_VERSION = '0.8.0';
+
+const CRASH_ON_DEPRECATED_DB_KEY = false;
 
 export let database: Deno.Kv;
 export let config: Config;
@@ -162,6 +165,10 @@ export function setConstants(Database: Deno.Kv, Config: Config) {
  * @param separators An array of strings to be used as separators.
  * @returns A RegExp that matches one or more of the specified separators.
  */
+export function assetPath(relativePath: string): string {
+    return new URL(`src/${relativePath}`, import.meta.url).pathname;
+}
+
 export function separatorsToRegex(separators: string[]): RegExp {
     const escaped = separators.map((sep) => `\\${sep}`).join('|');
     return new RegExp(`[${escaped}]+`);
@@ -179,6 +186,10 @@ export async function getFields(c: Context, fieldName: string): Promise<string[]
         return c.req.queries(fieldName);
     } else if (c.req.method === 'POST') {
         const contentType = c.req.header('content-type') || '';
+
+        const queryValues = c.req.queries(fieldName);
+        if (queryValues && queryValues.length > 0) return queryValues;
+        if (contentType.includes('application/json')) return undefined;
 
         if (contentType.includes('application/x-www-form-urlencoded')) {
             const formData = await c.req.formData();
@@ -213,6 +224,12 @@ export async function getField(c: Context, fieldName: string): Promise<string | 
     if (c.req.method === 'GET') {
         return c.req.query(fieldName);
     } else if (c.req.method === 'POST') {
+        const queryValue = c.req.query(fieldName);
+        if (queryValue !== undefined) return queryValue;
+
+        const contentType = c.req.header('content-type') || '';
+        if (contentType.includes('application/json')) return undefined;
+
         const body = await c.req.parseBody();
         return body[fieldName] as string | undefined;
     }
@@ -399,36 +416,209 @@ export async function ensureAdminUserExistsHybrid() {
     }
 }
 
+let cachedEncryptionKey: CryptoKey | null = null;
+
 /**
- * Retrieves the encryption key from the database, or creates and saves a new one if it doesn't exist.
- * @returns A promise that resolves to a CryptoKey for AES-GCM operations.
+ * Derives an AES-GCM CryptoKey from a plaintext seed string via SHA-256.
  */
-export async function getOrCreateEncryptionKey(): Promise<CryptoKey> {
-    const keyEntry = await database.get<string>(['system', 'encryptionKey']);
+async function deriveKeyFromSeed(seed: string): Promise<CryptoKey> {
+    const seedBytes = new TextEncoder().encode(seed);
+    const hash = await crypto.subtle.digest('SHA-256', seedBytes);
+    return await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
 
-    if (keyEntry.value) {
-        const keyBuffer = Uint8Array.from(atob(keyEntry.value), (c) => c.charCodeAt(0));
-        return await crypto.subtle.importKey(
-            'raw',
-            keyBuffer,
-            { name: 'AES-GCM' },
-            false,
-            ['encrypt', 'decrypt'],
+/**
+ * Returns the SHA-256 hex digest of a string. Used to store a fingerprint of
+ * the configured seed so we can detect seed changes across restarts without
+ * storing the seed itself.
+ */
+async function seedHash(seed: string): Promise<string> {
+    const seedBytes = new TextEncoder().encode(seed);
+    const hash = await crypto.subtle.digest('SHA-256', seedBytes);
+    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Imports an AES-GCM CryptoKey directly from a raw base64-encoded key string
+ * (the legacy auto-generated database key format).
+ */
+async function importRawKeyFromBase64(b64: string): Promise<CryptoKey> {
+    const keyBuffer = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return await crypto.subtle.importKey('raw', keyBuffer, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+/**
+ * Returns the active encryption key. Must only be called after `initEncryptionKey`
+ * has completed successfully.
+ */
+export function getEncryptionKey(): CryptoKey {
+    if (cachedEncryptionKey) return cachedEncryptionKey;
+    throw new Error('Encryption key has not been initialized. Ensure initEncryptionKey() is called on startup.');
+}
+
+/**
+ * Initializes the encryption key on startup. Resolution order:
+ *
+ * 1. `encryption_key` in config   — preferred
+ * 2. `DINO_ENCRYPTION_KEY` env var — alternative
+ * 3. `['system', 'encryptionKey']` in the KV database — DEPRECATED, logs a
+ *    prominent warning (or crashes if `CRASH_ON_DEPRECATED_DB_KEY` is true).
+ * 4. Nothing found → hard crash; an explicit key is now required.
+ *
+ * If a configured seed is present AND a legacy database key also exists, the
+ * function migrates all user passwords from the old key to the new one and
+ * removes the database key entry. If migration of an individual user fails,
+ * their password is reset to `config.default_admin_password` encrypted under
+ * the new key so the account remains accessible.
+ */
+export async function initEncryptionKey(): Promise<void> {
+    const resolvedSeed = config.encryption_key || null;
+    const dbKeyEntry = await database.get<string>(['system', 'encryptionKey']);
+    const hasDbKey = dbKeyEntry.value !== null && dbKeyEntry.value !== undefined;
+
+    if (!resolvedSeed && !hasDbKey) {
+        throw new Error(
+            '[Dinosonic] No encryption key found. ' +
+            'Set "encryption_key" in your config file or the DINO_ENCRYPTION_KEY environment variable. ' +
+            'The auto-generated database key is deprecated and was not found either.',
         );
-    } else {
-        const newKey = await crypto.subtle.generateKey(
-            { name: 'AES-GCM', length: 256 },
-            true,
-            ['encrypt', 'decrypt'],
-        );
-
-        const exportedKey = await crypto.subtle.exportKey('raw', newKey);
-        const keyBuffer = new Uint8Array(exportedKey);
-        const keyString = btoa(String.fromCharCode(...keyBuffer));
-
-        await database.set(['system', 'encryptionKey'], keyString);
-        return newKey;
     }
+
+    if (!resolvedSeed && hasDbKey) {
+        const msg =
+            '[Dinosonic] DEPRECATED: Your encryption key is stored in the database ' +
+            '(["system","encryptionKey"]). This method is no longer supported and will be ' +
+            'removed in a future release. Please set "encryption_key" in your config file or ' +
+            'the DINO_ENCRYPTION_KEY environment variable and restart. ' +
+            'On next startup with a configured key the database key will be migrated automatically.';
+
+        if (CRASH_ON_DEPRECATED_DB_KEY) {
+            throw new Error(msg);
+        }
+
+        logger.warn(msg);
+        cachedEncryptionKey = await importRawKeyFromBase64(dbKeyEntry.value!);
+        logger.info('Encryption key: loaded from deprecated database key. Server will continue, but please migrate.');
+        return;
+    }
+
+    cachedEncryptionKey = await deriveKeyFromSeed(resolvedSeed!);
+
+    if (!hasDbKey) {
+        const storedSeedHashEntry = await database.get<string>(['system', 'encryptionKeySeedHash']);
+        if (storedSeedHashEntry.value) {
+            const currentHash = await seedHash(resolvedSeed!);
+            if (storedSeedHashEntry.value !== currentHash) {
+                logger.warn(
+                    'Encryption seed has changed and no legacy database key is present for migration. ' +
+                    'All user passwords will be reset to the default_admin_password from config.',
+                );
+                await resetAllPasswords(cachedEncryptionKey);
+            } else {
+                logger.info('Encryption key: using configured seed (fingerprint matches).');
+            }
+        } else {
+            logger.info('Encryption key: configured seed in use for the first time, storing fingerprint.');
+        }
+
+        await database.set(['system', 'encryptionKeySeedHash'], await seedHash(resolvedSeed!));
+        return;
+    }
+
+    logger.info('Legacy database encryption key found alongside a configured seed. Starting password migration...');
+
+    const oldKey = await importRawKeyFromBase64(dbKeyEntry.value!);
+    await migratePasswordsToNewKey(oldKey, cachedEncryptionKey);
+
+    await database.delete(['system', 'encryptionKey']);
+    await database.set(['system', 'encryptionKeySeedHash'], await seedHash(resolvedSeed!));
+    logger.info('Migration complete. Legacy database key removed.');
+}
+
+/**
+ * Migrates all user passwords from `oldKey` to `newKey`. If decryption of a
+ * user's password fails (e.g. it was already encrypted with a different key),
+ * the password is reset to `config.default_admin_password` encrypted under
+ * `newKey` so the account remains accessible.
+ */
+async function migratePasswordsToNewKey(oldKey: CryptoKey, newKey: CryptoKey): Promise<void> {
+    let migrated = 0;
+    let reset = 0;
+
+    for await (const entry of database.list({ prefix: ['users'] })) {
+        const userParse = UserSchema.safeParse(entry.value);
+        if (!userParse.success) continue;
+
+        const user = userParse.data;
+        let plaintext: string;
+
+        try {
+            const combined = Uint8Array.from(atob(user.backend.password), (c) => c.charCodeAt(0));
+            const iv = combined.slice(0, 12);
+            const ciphertext = combined.slice(12);
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, oldKey, ciphertext);
+            plaintext = new TextDecoder().decode(decrypted);
+        } catch {
+            logger.warn(
+                `Could not decrypt password for user "${user.subsonic.username}" during migration. ` +
+                `Resetting to default_admin_password from config.`,
+            );
+            plaintext = config.default_admin_password;
+            reset++;
+        }
+
+        try {
+            const newIv = crypto.getRandomValues(new Uint8Array(12));
+            const newEncrypted = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: newIv },
+                newKey,
+                new TextEncoder().encode(plaintext),
+            );
+            const newCombined = new Uint8Array(newIv.length + newEncrypted.byteLength);
+            newCombined.set(newIv, 0);
+            newCombined.set(new Uint8Array(newEncrypted), newIv.length);
+            user.backend.password = btoa(String.fromCharCode(...newCombined));
+            await database.set(entry.key, user);
+            migrated++;
+        } catch {
+            logger.error(`Failed to re-encrypt password for user "${user.subsonic.username}". Entry skipped.`);
+        }
+    }
+
+    logger.info(`Password migration complete: ${migrated} migrated, ${reset} reset to default.`);
+}
+
+/**
+ * Re-encrypts all user passwords with `newKey` using `config.default_admin_password`
+ * as the plaintext. Used when the seed changes but there is no old key to decrypt from.
+ */
+async function resetAllPasswords(newKey: CryptoKey): Promise<void> {
+    let count = 0;
+
+    for await (const entry of database.list({ prefix: ['users'] })) {
+        const userParse = UserSchema.safeParse(entry.value);
+        if (!userParse.success) continue;
+
+        const user = userParse.data;
+        try {
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const encrypted = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                newKey,
+                new TextEncoder().encode(config.default_admin_password),
+            );
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv, 0);
+            combined.set(new Uint8Array(encrypted), iv.length);
+            user.backend.password = btoa(String.fromCharCode(...combined));
+            await database.set(entry.key, user);
+            count++;
+        } catch {
+            logger.error(`Failed to reset password for user "${user.subsonic.username}".`);
+        }
+    }
+
+    logger.info(`Reset ${count} user password(s) to default_admin_password.`);
 }
 
 /**
@@ -440,8 +630,7 @@ export async function encryptForTokenAuth(password: string): Promise<string> {
     const encoder = new TextEncoder();
     const data = encoder.encode(password);
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const key = await getOrCreateEncryptionKey();
-
+    const key = await getEncryptionKey();
     const encryptedData = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
 
     const combined = new Uint8Array(iv.length + encryptedData.byteLength);
@@ -460,7 +649,7 @@ export async function decryptForTokenAuth(encryptedData: string): Promise<string
     const combined = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
     const iv = combined.slice(0, 12);
     const ciphertext = combined.slice(12);
-    const key = await getOrCreateEncryptionKey();
+    const key = await getEncryptionKey();
 
     const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
 
@@ -472,7 +661,7 @@ export async function decryptForTokenAuth(encryptedData: string): Promise<string
  * Deletes a user and all of their associated data from the database in a single transaction.
  * @param id The ID of the user to delete.
  */
-export async function deleteUserReferences(id: string) {
+export async function deleteUserReferences(id: string, username?: string) {
     const txn = database.atomic();
 
     txn.delete(['users', id]);
@@ -495,6 +684,17 @@ export async function deleteUserReferences(id: string) {
     txn.delete(['playQueue', id]);
 
     await txn.commit();
+
+    if (username) {
+        const avatarsDir = path.join(config.data_folder, 'avatars');
+        for (const ext of ['jpg', 'png', 'gif', 'webp']) {
+            try {
+                await Deno.remove(path.join(avatarsDir, `${username}.${ext}`));
+            } catch {
+                // File doesn't exist
+            }
+        }
+    }
 }
 
 /**
@@ -590,14 +790,13 @@ export async function validateAuth(c: Context): Promise<Response | (SubsonicUser
 
     if (!client) return createResponse(c, {}, 'failed', { code: 10, message: "Missing parameter: 'c'" });
 
-    // Check for conflicting authentication mechanisms
     const authMethodsProvided = [
         username ? 1 : 0,
         apiKey ? 1 : 0,
     ].reduce((a, b) => a + b, 0);
 
     if (authMethodsProvided > 1) return createResponse(c, {}, 'failed', { code: 43, message: ERROR_MESSAGES[43] });
-    // API Key authentication
+
     if (apiKey) {
         const user = await getUserByApiKey(apiKey);
         if (!user) return createResponse(c, {}, 'failed', { code: 44, message: ERROR_MESSAGES[44] });
@@ -612,13 +811,11 @@ export async function validateAuth(c: Context): Promise<Response | (SubsonicUser
         return { ...user.subsonic, id: user.backend.id };
     }
 
-    // Username/password based authentication
     if (!username) return createResponse(c, {}, 'failed', { code: 10, message: "Missing parameter: 'u'" });
 
     const user = await getUserByUsername(username);
     if (!user) return createResponse(c, {}, 'failed', { code: 40, message: ERROR_MESSAGES[40] });
 
-    // Token-based authentication
     if (token && salt) {
         const originalPassword = await decryptForTokenAuth(user.backend.password);
         const expectedToken = generateTokenHash(originalPassword, salt);
@@ -628,7 +825,6 @@ export async function validateAuth(c: Context): Promise<Response | (SubsonicUser
         return { ...user.subsonic, id: user.backend.id };
     }
 
-    // Password-based authentication
     if (password) {
         const plainPassword = password.startsWith('enc:') ? hexToString(password.slice(4)) : password;
         const originalPassword = await decryptForTokenAuth(user.backend.password);

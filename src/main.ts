@@ -15,7 +15,7 @@ import {
 } from './zod.ts';
 import { scanMediaDirectories } from './MediaScanner.ts';
 import { parseArgs } from '@std/cli';
-import { ensureAdminUserExistsHybrid, logger, parseTimeToMs, registerTempDirCleanup, SERVER_VERSION, setConstants, setupLogger } from './util.ts';
+import { assetPath, ensureAdminUserExistsHybrid, initEncryptionKey, logger, parseTimeToMs, registerTempDirCleanup, SERVER_VERSION, setConstants, setupLogger } from './util.ts';
 import restRoutes from './client/rest/index.ts';
 import apiRoutes from './client/api/index.ts';
 import { Context, Hono, Next } from '@hono/hono';
@@ -96,6 +96,7 @@ if (configFile) {
         audio_similarity_enabled: Deno.env.get('DINO_AUDIO_SIMILARITY_ENABLED'),
         audiomuse_url: Deno.env.get('DINO_AUDIOMUSE_URL'),
         audiomuse_api_token: Deno.env.get('DINO_AUDIOMUSE_API_TOKEN'),
+        encryption_key: Deno.env.get('DINO_ENCRYPTION_KEY'),
     };
 
     const conf: Config = {
@@ -111,6 +112,7 @@ if (configFile) {
         genre_separators: (envVars.genre_separators || ';,').split(''),
         // @ts-expect-error If default admin password is not set via env, error and exit.
         default_admin_password: envVars.default_admin_password,
+        encryption_key: envVars.encryption_key,
     };
 
     if (envVars.lastfm_enabled || envVars.lastfm_scrobbling) {
@@ -172,9 +174,10 @@ if (!config.default_admin_password.length) throw new Error('Default admin passwo
 
 await setupLogger(config.log_level);
 await ensureDir(config.data_folder);
+await ensureDir(path.join(config.data_folder, 'avatars'));
 
 registerTempDirCleanup();
-const database = await Deno.openKv(path.join(config.data_folder as string, 'dinosonic.db'));
+const database = await Deno.openKv(path.join(config.data_folder, 'dinosonic.db'));
 setConstants(database, config);
 
 async function cleanupNowPlaying() {
@@ -202,17 +205,17 @@ async function cleanupNowPlaying() {
 setInterval(cleanupNowPlaying, 60 * 1000);
 cleanupNowPlaying();
 
-function cleanupShareCache() {
+
+setInterval(function cleanupShareCache() {
     const now = Date.now();
     for (const [key, value] of sharePageCache.entries()) {
         if (now - value.timestamp >= CACHE_TTL) {
             sharePageCache.delete(key);
         }
     }
-}
+}, 5 * 60 * 1000);
 
-setInterval(cleanupShareCache, 5 * 60 * 1000);
-
+await initEncryptionKey();
 await ensureAdminUserExistsHybrid();
 
 if (config.scan_on_start) {
@@ -279,7 +282,7 @@ app.use('*', async (c: Context, next: Next) => {
 
 app.use('/api/*', authMiddleware);
 app.use('/admin/*', authMiddleware);
-app.use('/public/*', serveStatic({ root: new URL('./client/', import.meta.url).pathname }));
+app.use('/public/*', serveStatic({ root: assetPath('client') }));
 
 app.route('/rest', restRoutes);
 app.route('/api', apiRoutes);
@@ -287,7 +290,7 @@ app.route('/api', apiRoutes);
 app.get('/favicon.ico', (c: Context) => c.redirect('/public/favicon.ico'));
 app.get('/admin/login', async (c: Context) => {
     try {
-        const content = await Deno.readTextFile(new URL('./client/admin/login.html', import.meta.url));
+        const content = await Deno.readTextFile(assetPath('client/admin/login.html'));
         return c.html(content);
     } catch (error) {
         console.error('Error loading login page:', error);
@@ -295,9 +298,13 @@ app.get('/admin/login', async (c: Context) => {
     }
 });
 
+app.get('/admin', (c: Context) => {
+    return c.redirect('/admin/');
+});
+
 app.get('/admin/', async (c: Context) => {
     try {
-        const content = await Deno.readTextFile(new URL('./client/admin/index.html', import.meta.url));
+        const content = await Deno.readTextFile(assetPath('client/admin/index.html'));
         return c.html(content);
     } catch (error) {
         console.error('Error loading admin page:', error);
@@ -515,7 +522,7 @@ app.get('/share/:shareId', async (c: Context) => {
             if (item.subsonic.album) metaTagsHtml += `<meta property="music:album" content="${item.subsonic.album.replace(/"/g, '"')}">`;
         } // etc. for album, playlist
 
-        let htmlContent = await Deno.readTextFile(new URL('./client/share/share.html', import.meta.url));
+        let htmlContent = await Deno.readTextFile(assetPath('client/share/share.html'));
         // Replace a placeholder in share.html with the dynamic meta tags and page title
         htmlContent = htmlContent.replace(
             /<title>Dinosonic Share<\/title>/,
@@ -543,7 +550,6 @@ if (config.ui_folder) {
         }
         logger.info(`Serving static UI from: ${config.ui_folder}`);
 
-        // Cache the UI folder path for better performance
         const uiFolder = config.ui_folder;
 
         app.get(
@@ -551,14 +557,11 @@ if (config.ui_folder) {
             serveStatic({
                 root: uiFolder,
                 rewriteRequestPath: (reqPath) => {
-                    // Use async stat for better performance and avoid blocking the event loop
                     const fullPath = path.join(uiFolder, reqPath);
                     try {
-                        // Check if file exists using a more efficient approach
                         const stats = Deno.statSync(fullPath);
                         return stats.isFile || stats.isDirectory ? reqPath : 'index.html';
                     } catch {
-                        // File doesn't exist, serve index.html for SPA routing
                         return 'index.html';
                     }
                 },
@@ -577,7 +580,7 @@ if (config.ui_folder) {
 } else {
     app.get('/', async (c: Context) => {
         try {
-            const content = await Deno.readTextFile(new URL('./client/index.html', import.meta.url));
+            const content = await Deno.readTextFile(assetPath('client/index.html'));
             return c.html(content);
         } catch (error) {
             logger.error('Error loading index page:', error);

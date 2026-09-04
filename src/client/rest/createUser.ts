@@ -29,6 +29,7 @@ async function handlecreateUser(c: Context) {
 
     if (!username) return createResponse(c, {}, 'failed', { code: 10, message: "Missing parameter: 'username'" });
     if (!password) return createResponse(c, {}, 'failed', { code: 10, message: "Missing parameter: 'password'" });
+    if (/[\/\\]|\.\./.test(username)) return createResponse(c, {}, 'failed', { code: 10, message: "Invalid username: contains illegal characters" });
 
     const user = await getUserByUsername(username);
     if (user) return createResponse(c, {}, 'failed', { code: 40, message: 'That username is already in use' });

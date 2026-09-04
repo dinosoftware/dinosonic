@@ -1,0 +1,185 @@
+when:
+  event: manual
+
+steps:
+  verify-sync:
+    image: alpine/curl
+    commands:
+      - |
+        COMMIT=${CI_COMMIT_SHA}
+        echo "Checking Forgejo..."
+        FORGEJO=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $FORGEJO_TOKEN" \
+          "https://git.fuge.dev/api/v1/repos/${CI_REPO}/git/commits/$COMMIT")
+
+        echo "Checking Codeberg..."
+        CODEBERG=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $CODEBERG_TOKEN" \
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/git/commits/$COMMIT")
+
+        echo "Checking GitHub..."
+        GITHUB=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          "https://api.github.com/repos/${CI_REPO}/commits/$COMMIT")
+
+        echo "Forgejo: $FORGEJO | Codeberg: $CODEBERG | GitHub: $GITHUB"
+
+        if [ "$FORGEJO" != "200" ] || [ "$CODEBERG" != "200" ] || [ "$GITHUB" != "200" ]; then
+          echo "ERROR: Mirrors not in sync. Aborting."
+          exit 1
+        fi
+    environment:
+      FORGEJO_TOKEN: { from_secret: forgejo_token }
+      CODEBERG_TOKEN: { from_secret: codeberg_token }
+      GITHUB_TOKEN: { from_secret: github_token }
+
+  create-tag:
+    image: alpine/curl
+    depends_on: [verify-sync]
+    when:
+      evaluate: 'BINARY_BUILD == "true"'
+    commands:
+      - |
+        # FORGEJO
+        echo "Creating draft release on Forgejo..."
+        RESP_FJ=$(curl -s -X POST \
+          -H "Authorization: token $FORGEJO_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases")
+        FJ_ID=$(echo "$RESP_FJ" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
+        if [ -z "$FJ_ID" ] || [ "$FJ_ID" = "null" ]; then echo "FORGEJO ERROR: $RESP_FJ"; exit 1; fi
+        echo "$FJ_ID" > .forgejo_id
+        echo "Forgejo ID: $FJ_ID"
+
+        # CODEBERG
+        echo "Creating draft release on Codeberg..."
+        RESP_CB=$(curl -s -X POST \
+          -H "Authorization: token $CODEBERG_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/releases")
+        CB_ID=$(echo "$RESP_CB" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
+        if [ -z "$CB_ID" ] || [ "$CB_ID" = "null" ]; then echo "CODEBERG ERROR: $RESP_CB"; exit 1; fi
+        echo "$CB_ID" > .codeberg_id
+        echo "Codeberg ID: $CB_ID"
+
+        # GITHUB
+        echo "Creating draft release on GitHub..."
+        RESP_GH=$(curl -s -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -A "Woodpecker-CI-Curl" \
+          -H "Content-Type: application/json" \
+          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"v${VERSION}\", \"target_commitish\": \"${CI_COMMIT_SHA}\", \"draft\": true}" \
+          "https://api.github.com/repos/${CI_REPO}/releases")
+        GH_ID=$(echo "$RESP_GH" | grep -o '"id":[ ]*[0-9]*' | head -1 | cut -d: -f2 | tr -d ' ')
+        if [ -z "$GH_ID" ] || [ "$GH_ID" = "null" ]; then echo "GITHUB ERROR: $RESP_GH"; exit 1; fi
+        echo "$GH_ID" > .github_id
+        echo "GitHub ID: $GH_ID"
+    environment:
+      FORGEJO_TOKEN: { from_secret: forgejo_token }
+      CODEBERG_TOKEN: { from_secret: codeberg_token }
+      GITHUB_TOKEN: { from_secret: github_token }
+
+  build-binaries:
+    image: denoland/deno:latest
+    depends_on: [create-tag]
+    when:
+      evaluate: 'BINARY_BUILD == "true"'
+    commands:
+      - deno task build:linux
+      - deno task build:linuxarm
+      - deno task build:mac
+      - deno task build:macarm
+      - deno task build:windows
+
+  release-forgejo:
+    image: alpine/curl
+    depends_on: [build-binaries]
+    when:
+      evaluate: 'BINARY_BUILD == "true"'
+    commands:
+      - |
+        RELEASE_ID=$(cat .forgejo_id)
+        for FILE in dist/*; do
+          curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" -F "attachment=@$FILE" \
+            "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID/assets"
+        done
+        curl -s -X PATCH -H "Authorization: token $FORGEJO_TOKEN" -H "Content-Type: application/json" \
+          -d "{\"draft\": false}" "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID"
+    environment:
+      FORGEJO_TOKEN: { from_secret: forgejo_token }
+
+  release-codeberg:
+    image: alpine/curl
+    depends_on: [build-binaries]
+    when:
+      evaluate: 'BINARY_BUILD == "true"'
+    commands:
+      - |
+        RELEASE_ID=$(cat .codeberg_id)
+        for FILE in dist/*; do
+          curl -s -X POST -H "Authorization: token $CODEBERG_TOKEN" -F "attachment=@$FILE" \
+            "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID/assets"
+        done
+        curl -s -X PATCH -H "Authorization: token $CODEBERG_TOKEN" -H "Content-Type: application/json" \
+          -d "{\"draft\": false}" "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/$RELEASE_ID"
+    environment:
+      CODEBERG_TOKEN: { from_secret: codeberg_token }
+
+  release-github:
+    image: alpine/curl
+    depends_on: [build-binaries]
+    when:
+      evaluate: 'BINARY_BUILD == "true"'
+    commands:
+      - |
+        RELEASE_ID=$(cat .github_id)
+        for FILE in dist/*; do
+          FILENAME=$(basename $FILE)
+          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" \
+            "https://uploads.github.com/repos/${CI_REPO}/releases/$RELEASE_ID/assets?name=$FILENAME" \
+            --data-binary "@$FILE"
+        done
+        curl -s -X PATCH -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+          -d "{\"draft\": false}" "https://api.github.com/repos/${CI_REPO}/releases/$RELEASE_ID"
+    environment:
+      GITHUB_TOKEN: { from_secret: github_token }
+
+  docker-build-primary:
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on: [verify-sync]
+    when:
+      evaluate: 'BUILD_DOCKER == "true"'
+    privileged: true
+    settings:
+      repo: git.fuge.dev/${CI_REPO}
+      platforms: linux/amd64,linux/arm64
+      build_args: ["app_version=${VERSION}"]
+      tags: ["v${VERSION}", "latest"]
+      registry: git.fuge.dev
+      username: dinosoftware
+      password: { from_secret: forgejo_token }
+
+  docker-sync-mirrors:
+    image: quay.io/skopeo/stable:latest
+    depends_on: [docker-build-primary]
+    when:
+      evaluate: 'BUILD_DOCKER == "true"'
+    commands:
+      - |
+        # GHCR Sync
+        skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
+          docker://git.fuge.dev/${CI_REPO}:latest docker://ghcr.io/${CI_REPO}:latest
+        skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
+          docker://git.fuge.dev/${CI_REPO}:v${VERSION} docker://ghcr.io/${CI_REPO}:v${VERSION}
+        # Codeberg Sync
+        skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
+          docker://git.fuge.dev/${CI_REPO}:latest docker://codeberg.org/${CI_REPO}:latest
+        skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
+          docker://git.fuge.dev/${CI_REPO}:v${VERSION} docker://codeberg.org/${CI_REPO}:v${VERSION}
+    environment:
+      FORGEJO_TOKEN: { from_secret: forgejo_token }
+      GITHUB_TOKEN: { from_secret: github_token }
+      CODEBERG_TOKEN: { from_secret: codeberg_token }

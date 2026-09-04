@@ -95,6 +95,7 @@ export const ConfigSchema = z.object({
     artist_separators: z.array(z.string()).default([';', '/']),
     genre_separators: z.array(z.string()).default([';', ',']),
     default_admin_password: z.string().default('adminPassword'),
+    encryption_key: z.string().optional(),
 });
 
 export const ReplayGainSchema = z.object({

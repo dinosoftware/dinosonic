@@ -5,6 +5,20 @@
   </a>
 
 <h3 align="center">Dinosonic</h3>
+<p align="center">
+  <a href="https://pecker.fuge.dev/repos/2" target="_blank">
+    <img src="https://pecker.fuge.dev/api/badges/2/status.svg?events=manual" alt="status-badge" />
+  </a>
+  <a href="https://github.com/users/dinosoftware/packages/container/package/dinosonic">
+    <img src="https://img.shields.io/badge/docker-ghcr.io/dinosoftware/dinosonic-blue?style=flat&logo=docker" alt="GHCR Docker Image">
+  </a>
+  <a href="https://codeberg.org/dinosoftware/-/packages/container/dinosonic">
+    <img src="https://img.shields.io/badge/docker-codeberg.org/dinosoftware/dinosonic-blue?style=flat&logo=docker" alt="Codeberg Docker Image">
+  </a>
+  <a href="https://git.fuge.dev/dinosoftware/-/packages/container/dinosonic">
+    <img src="https://img.shields.io/badge/docker-git.fuge.dev/dinosoftware/dinosonic-blue?style=flat&logo=docker" alt="Forgejo Docker Image">
+  </a>
+</p>
 
 <p align="center">
     Dinosonic is a fast, lightweight music streaming server built with Deno, inspired by the Subsonic API.
@@ -12,17 +26,25 @@
 </p>
 <hr>
 
-<p align="center">
-  <a href="https://www.gnu.org/licenses/gpl-3.0">
-    <img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License: GPL v3">
-  </a>
-  <a href="https://github.com/dinosoftware/dinosonic/actions/workflows/build-release.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/dinosoftware/dinosonic/build-release.yml?style=flat-square&logo=github&label=Build%20and%20Release%20Dinosonic&color=blue" alt="GitHub Actions Workflow Status">
-  </a>
-  <a href="https://github.com/users/dinosoftware/packages/container/package/dinosonic">
-    <img src="https://img.shields.io/badge/docker-ghcr.io/dinosoftware/dinosonic-blue?style=flat-square&logo=docker" alt="Docker Image">
-  </a>
-</p>
+## Repositories
+
+Dinosonic is available on multiple platforms. GitHub serves as a mirror. The primary repository is on my self-hosted Forgejo instance.
+
+| Platform              | URL                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| **Primary** (Forgejo) | [git.fuge.dev/dinosoftware/dinosonic](https://git.fuge.dev/dinosoftware/dinosonic) |
+| **Mirror** (Codeberg) | [codeberg.org/dinosoftware/dinosonic](https://codeberg.org/dinosoftware/dinosonic) |
+| **Mirror** (GitHub)   | [github.com/dinosoftware/dinosonic](https://github.com/dinosoftware/dinosonic)     |
+
+## Docker Images
+
+Container images are published to multiple registries:
+
+| Registry              | Image                                        |
+| --------------------- | -------------------------------------------- |
+| **Primary**           | `git.fuge.dev/dinosoftware/dinosonic:latest` |
+| **Mirror** (Codeberg) | `codeberg.org/dinosoftware/dinosonic:latest` |
+| **Mirror** (GitHub)   | `ghcr.io/dinosoftware/dinosonic:latest`      |
 
 ## Features
 
@@ -65,12 +87,35 @@ docker run -d --name dinosonic \
   ghcr.io/dinosoftware/dinosonic:latest
 ```
 
+<details>
+<summary><strong>Alternative Docker Registries</strong></summary>
+
+Docker images are published to multiple registries. Use whichever you prefer:
+
+| Registry               | Image                                        |
+| ---------------------- | -------------------------------------------- |
+| GitHub (GHCR)          | `ghcr.io/dinosoftware/dinosonic:latest`      |
+| Codeberg               | `codeberg.org/dinosoftware/dinosonic:latest` |
+| Forgejo (git.fuge.dev) | `git.fuge.dev/dinosoftware/dinosonic:latest` |
+
+Simply replace the image name in any `docker run` or `docker compose` command. For example:
+
+```sh
+# Codeberg
+docker run ... codeberg.org/dinosoftware/dinosonic:latest
+
+# Forgejo
+docker run ... git.fuge.dev/dinosoftware/dinosonic:latest
+```
+
+</details>
+
 Or as a docker compose:
 
 ```yaml
 services:
     dinosonic:
-        image: ghcr.io/dinosoftware/dinosonic:latest
+        image: ghcr.io/dinosoftware/dinosonic:latest # Also available: codeberg.org/dinosoftware/dinosonic:latest, git.fuge.dev/dinosoftware/dinosonic:latest
         container_name: dinosonic
         restart: unless-stopped
         ports:
@@ -115,32 +160,32 @@ services:
 
 #### Environment Variables
 
-| Variable                       | Description                                                                                | Default         |
-| ------------------------------ | ------------------------------------------------------------------------------------------ | --------------- |
-| `DINO_PORT`                    | Server port                                                                                | `4100`          |
-| `DINO_LOG_LEVEL`               | Logging level (`OFF`, `INFO`, `DEBUG`, `WARNING`, `ERROR`)                                 | `OFF`           |
-| `DINO_DATA_FOLDER`             | Path for storing metadata, database, and covers.                                           | _Required_      |
-| `DINO_UI_FOLDER`               | Custom UI Frontend folder containing the static HTML, CSS, and JS.                         | None            |
-| `DINO_MUSIC_FOLDERS`           | Semicolon-separated list of music folders (e.g., `/music;/more_music`).                    | `[]`            |
-| `DINO_SCAN_ON_START`           | Scan music library on startup (`true`/`false`).                                            | `false`         |
-| `DINO_SCAN_INTERVAL`           | Interval for rescanning (e.g., `1d`, `12h`, `1hr 25m 10s`).                                | `1d`            |
-| `DINO_ARTIST_SEPARATORS`       | Characters used to separate multiple artists in tags (e.g., `';/'`).                       | `';/'`          |
-| `DINO_GENRE_SEPARATORS`        | Characters used to separate multiple genres in tags (e.g., `';,'`).                        | `';,'`          |
-| `DINO_DEFAULT_ADMIN_PASSWORD`  | Default password for the 'admin' user. Only used for the first initialization.             | `adminPassword` |
-| `DINO_LASTFM_ENABLED`          | Enable Last.fm metadata fetching (`true`/`false`).                                         | `false`         |
-| `DINO_LASTFM_SCROBBLING`       | Enable Last.fm scrobbling and loved track sync (`true`/`false`). (Implies Last.fm enabled) | `false`         |
-| `DINO_LASTFM_APIKEY`           | Last.fm API key. \*Required if `DINO_LASTFM_ENABLED` or `DINO_LASTFM_SCROBBLING` is true.  | _None\*_        |
-| `DINO_LASTFM_APISECRET`        | Last.fm API secret. \*Required if `DINO_LASTFM_SCROBBLING` is true.                        | _None\*_        |
-| `DINO_MUSICBRAINZ_ENABLED`     | Enable MusicBrainz metadata and cover art fetching (`true`/`false`).                       | `true`          |
-| `DINO_SPOTIFY_ENABLED`         | Enable Spotify integration for artist cover art (`true`/`false`).                          | `false`         |
-| `DINO_SPOTIFY_CLIENT_ID`       | Spotify Client ID. \*Required if `DINO_SPOTIFY_ENABLED` is true.                           | _None\*_        |
-| `DINO_SPOTIFY_CLIENT_SECRET`   | Spotify Client Secret. \*Required if `DINO_SPOTIFY_ENABLED` is true.                       | _None\*_        |
-| `DINO_LISTENBRAINZ_SCROBBLING` | Enable ListenBrainz scrobbling (`true`/`false`). Tokens set per-user in admin panel.       | `false`         |
-| `DINO_TRANSCODING_ENABLED`     | Enable FFmpeg-based transcoding for streaming and cover art resizing (`true`/`false`).     | `false`         |
-| `DINO_FFMPEG_PATH`             | Path to `ffmpeg` binary.                                                                   | `ffmpeg`        |
-| `DINO_AUDIO_SIMILARITY_ENABLED`| Enable audio-based similarity via AudioMuse-AI (`true`/`false`).                           | `false`         |
-| `DINO_AUDIOMUSE_URL`           | AudioMuse-AI server URL. \*Required if `DINO_AUDIO_SIMILARITY_ENABLED` is true.            | _None\*_        |
-| `DINO_AUDIOMUSE_API_TOKEN`     | AudioMuse-AI API token (Bearer auth). \*Required when AudioMuse auth is enabled.           | _None\*_        |
+| Variable                        | Description                                                                                | Default         |
+| ------------------------------- | ------------------------------------------------------------------------------------------ | --------------- |
+| `DINO_PORT`                     | Server port                                                                                | `4100`          |
+| `DINO_LOG_LEVEL`                | Logging level (`OFF`, `INFO`, `DEBUG`, `WARNING`, `ERROR`)                                 | `OFF`           |
+| `DINO_DATA_FOLDER`              | Path for storing metadata, database, and covers.                                           | _Required_      |
+| `DINO_UI_FOLDER`                | Custom UI Frontend folder containing the static HTML, CSS, and JS.                         | None            |
+| `DINO_MUSIC_FOLDERS`            | Semicolon-separated list of music folders (e.g., `/music;/more_music`).                    | `[]`            |
+| `DINO_SCAN_ON_START`            | Scan music library on startup (`true`/`false`).                                            | `false`         |
+| `DINO_SCAN_INTERVAL`            | Interval for rescanning (e.g., `1d`, `12h`, `1hr 25m 10s`).                                | `1d`            |
+| `DINO_ARTIST_SEPARATORS`        | Characters used to separate multiple artists in tags (e.g., `';/'`).                       | `';/'`          |
+| `DINO_GENRE_SEPARATORS`         | Characters used to separate multiple genres in tags (e.g., `';,'`).                        | `';,'`          |
+| `DINO_DEFAULT_ADMIN_PASSWORD`   | Default password for the 'admin' user. Only used for the first initialization.             | `adminPassword` |
+| `DINO_LASTFM_ENABLED`           | Enable Last.fm metadata fetching (`true`/`false`).                                         | `false`         |
+| `DINO_LASTFM_SCROBBLING`        | Enable Last.fm scrobbling and loved track sync (`true`/`false`). (Implies Last.fm enabled) | `false`         |
+| `DINO_LASTFM_APIKEY`            | Last.fm API key. \*Required if `DINO_LASTFM_ENABLED` or `DINO_LASTFM_SCROBBLING` is true.  | _None\*_        |
+| `DINO_LASTFM_APISECRET`         | Last.fm API secret. \*Required if `DINO_LASTFM_SCROBBLING` is true.                        | _None\*_        |
+| `DINO_MUSICBRAINZ_ENABLED`      | Enable MusicBrainz metadata and cover art fetching (`true`/`false`).                       | `true`          |
+| `DINO_SPOTIFY_ENABLED`          | Enable Spotify integration for artist cover art (`true`/`false`).                          | `false`         |
+| `DINO_SPOTIFY_CLIENT_ID`        | Spotify Client ID. \*Required if `DINO_SPOTIFY_ENABLED` is true.                           | _None\*_        |
+| `DINO_SPOTIFY_CLIENT_SECRET`    | Spotify Client Secret. \*Required if `DINO_SPOTIFY_ENABLED` is true.                       | _None\*_        |
+| `DINO_LISTENBRAINZ_SCROBBLING`  | Enable ListenBrainz scrobbling (`true`/`false`). Tokens set per-user in admin panel.       | `false`         |
+| `DINO_TRANSCODING_ENABLED`      | Enable FFmpeg-based transcoding for streaming and cover art resizing (`true`/`false`).     | `false`         |
+| `DINO_FFMPEG_PATH`              | Path to `ffmpeg` binary.                                                                   | `ffmpeg`        |
+| `DINO_AUDIO_SIMILARITY_ENABLED` | Enable audio-based similarity via AudioMuse-AI (`true`/`false`).                           | `false`         |
+| `DINO_AUDIOMUSE_URL`            | AudioMuse-AI server URL. \*Required if `DINO_AUDIO_SIMILARITY_ENABLED` is true.            | _None\*_        |
+| `DINO_AUDIOMUSE_API_TOKEN`      | AudioMuse-AI API token (Bearer auth). \*Required when AudioMuse auth is enabled.           | _None\*_        |
 
 ---
 
@@ -330,14 +375,17 @@ api_token = "your_audiomuse_api_token" # Required when AudioMuse auth is enabled
 
 - **Multiple Music Folder Support** – Full implementation of music folders for library organization
 - **Enhanced Statistics** – More detailed playback statistics and analytics in the Admin Panel
-- **Advanced Search** – Improved search capabilities with filters and operators
-- **Playlist Sharing** – Public playlist sharing with customizable permissions
 
 ---
 
 ## Contributing
 
-Feel free to contribute by submitting issues, feature requests, or pull requests at the [Dinosonic GitHub Repository](https://github.com/dinosoftware/dinosonic).
+Feel free to contribute by submitting issues, feature requests, or pull requests at any of the following:
+
+- [GitHub](https://github.com/dinosoftware/dinosonic)
+- [Codeberg](https://codeberg.org/dinosoftware/dinosonic)
+
+> **Note:** [Forgejo (git.fuge.dev)](https://git.fuge.dev/dinosoftware/dinosonic) is a read-only mirror (no sign-ups).
 
 ---
 

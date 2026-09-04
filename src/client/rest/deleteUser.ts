@@ -18,7 +18,7 @@ async function handleDeleteUser(c: Context) {
     }
 
     // Delete the user and all related data
-    await deleteUserReferences(user.backend.id);
+    await deleteUserReferences(user.backend.id, user.subsonic.username);
 
     return createResponse(c, {}, 'ok');
 }

@@ -25,6 +25,7 @@ async function handleUpdateUser(c: Context) {
     const scrobblingEnabled = toBoolean(await getField(c, 'scrobblingEnabled'));
 
     if (!username) return createResponse(c, {}, 'failed', { code: 10, message: "Missing parameter: 'username'" });
+    if (/[\/\\]|\.\./.test(username)) return createResponse(c, {}, 'failed', { code: 10, message: "Invalid username: contains illegal characters" });
     if (password && password.startsWith('enc:')) password = hexToString(password.slice(4));
     if (password) password = await encryptForTokenAuth(password);
 

@@ -67,6 +67,7 @@ export async function getSimilarTracks(
         const response = await request('/api/similar_tracks', {
             item_id: trackId,
             n: count.toString(),
+            radius_similarity: 'true',
         });
 
         if (!response.ok) {

@@ -227,6 +227,16 @@
             </div>
         </div>
 
+        <!-- Audio Similarity -->
+        <div id="audio-similarity-section" class="w-full max-w-2xl border border-white p-6 dashboard-container hidden">
+            <h2 class="text-2xl mb-4">Audio Similarity</h2>
+            <p>Status: <span id="audio-similarity-status" class="text-gray-400">Checking...</span></p>
+            <div id="audio-similarity-analysis" class="mt-2 text-sm text-gray-400 hidden"></div>
+            <button id="audio-similarity-analyze" class="w-full bg-blue-600 p-2 uppercase mt-4 hover-effect hidden">
+                Start Analysis
+            </button>
+        </div>
+
         <!-- Logout -->
         <div class="w-full max-w-2xl border border-white p-6 dashboard-container">
             <button id="logout-button" class="w-full bg-red-500 p-2 uppercase hover-effect">Logout</button>
@@ -261,6 +271,20 @@
                 <h3 class="font-semibold">Permissions</h3>
                 <div id="edit-permissions" class="grid grid-cols-2 gap-2 mt-2">
                     <!-- Checkboxes will be inserted here -->
+                </div>
+            </div>
+            <div class="mt-4">
+                <h3 class="font-semibold mb-2">Avatar</h3>
+                <div class="flex items-center gap-4 mb-2">
+                    <img id="edit-avatar-preview" src="" alt="Avatar"
+                        class="hidden w-16 h-16 object-cover border border-white">
+                    <span id="edit-avatar-none" class="text-gray-400 text-sm">No avatar set</span>
+                </div>
+                <input type="file" id="edit-avatar-input" accept="image/*" class="w-full mb-2 text-sm">
+                <div class="flex gap-2">
+                    <button id="upload-avatar" class="bg-blue-600 px-3 py-1 text-sm hover-effect">Upload</button>
+                    <button id="delete-avatar" class="bg-red-500 px-3 py-1 text-sm hover-effect hidden">Delete
+                        Avatar</button>
                 </div>
             </div>
             <div class="mt-4 flex justify-between">
@@ -433,9 +457,104 @@
                     `;
                 });
 
+                // Load avatar preview
+                const avatarPreview = document.getElementById('edit-avatar-preview');
+                const avatarNone = document.getElementById('edit-avatar-none');
+                const deleteAvatarBtn = document.getElementById('delete-avatar');
+                const avatarUrl = `/api/avatar/${encodeURIComponent(username)}?bust=${Date.now()}`;
+
+                // Probe whether an avatar exists
+                try {
+                    const avatarRes = await fetch(avatarUrl, { method: 'HEAD' });
+                    if (avatarRes.ok) {
+                        avatarPreview.src = avatarUrl;
+                        avatarPreview.classList.remove('hidden');
+                        avatarNone.classList.add('hidden');
+                        deleteAvatarBtn.classList.remove('hidden');
+                    } else {
+                        avatarPreview.src = '';
+                        avatarPreview.classList.add('hidden');
+                        avatarNone.classList.remove('hidden');
+                        deleteAvatarBtn.classList.add('hidden');
+                    }
+                } catch {
+                    avatarPreview.src = '';
+                    avatarPreview.classList.add('hidden');
+                    avatarNone.classList.remove('hidden');
+                    deleteAvatarBtn.classList.add('hidden');
+                }
+
+                document.getElementById('edit-avatar-input').value = '';
+
                 // Show modal
                 editUserModal.classList.remove('hidden');
             };
+
+            document.getElementById('upload-avatar').addEventListener('click', async () => {
+                if (!editingUser) return;
+                const fileInput = document.getElementById('edit-avatar-input');
+                const file = fileInput.files && fileInput.files[0];
+                if (!file) {
+                    alert('Please select an image file first.');
+                    return;
+                }
+                if (!file.type.startsWith('image/')) {
+                    alert('Selected file is not an image.');
+                    return;
+                }
+                if (file.size > 2 * 1024 * 1024) {
+                    alert('Image must be under 2MB.');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('avatar', file);
+
+                try {
+                    const response = await fetch(`/api/avatar/${encodeURIComponent(editingUser.username)}`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const result = await response.json();
+                    if (response.ok && result.success) {
+                        // Refresh preview
+                        const avatarPreview = document.getElementById('edit-avatar-preview');
+                        avatarPreview.src = `/api/avatar/${encodeURIComponent(editingUser.username)}?bust=${Date.now()}`;
+                        avatarPreview.classList.remove('hidden');
+                        document.getElementById('edit-avatar-none').classList.add('hidden');
+                        document.getElementById('delete-avatar').classList.remove('hidden');
+                        fileInput.value = '';
+                    } else {
+                        alert(`Failed to upload avatar: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    console.error('Avatar upload error:', error);
+                    alert('Error uploading avatar.');
+                }
+            });
+
+            document.getElementById('delete-avatar').addEventListener('click', async () => {
+                if (!editingUser) return;
+                if (!confirm('Delete avatar for this user?')) return;
+
+                try {
+                    const response = await fetch(`/api/avatar/${encodeURIComponent(editingUser.username)}`, {
+                        method: 'DELETE',
+                    });
+                    const result = await response.json();
+                    if (response.ok && result.success) {
+                        document.getElementById('edit-avatar-preview').classList.add('hidden');
+                        document.getElementById('edit-avatar-preview').src = '';
+                        document.getElementById('edit-avatar-none').classList.remove('hidden');
+                        document.getElementById('delete-avatar').classList.add('hidden');
+                    } else {
+                        alert(`Failed to delete avatar: ${result.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    console.error('Avatar delete error:', error);
+                    alert('Error deleting avatar.');
+                }
+            });
 
             saveUserBtn.addEventListener('click', async () => {
                 if (!editingUser) return;
@@ -1284,9 +1403,94 @@
                 }
             });
 
+            async function checkAudioSimilarity() {
+                const section = document.getElementById('audio-similarity-section');
+                const statusEl = document.getElementById('audio-similarity-status');
+                const analysisEl = document.getElementById('audio-similarity-analysis');
+                const analyzeBtn = document.getElementById('audio-similarity-analyze');
+
+                try {
+                    const response = await fetch('/api/audio-similarity/status');
+                    const data = await response.json();
+
+                    if (!data.enabled) {
+                        // Not enabled in config — keep section hidden
+                        return;
+                    }
+
+                    section.classList.remove('hidden');
+
+                    if (!data.connected) {
+                        statusEl.textContent = 'Disconnected';
+                        statusEl.className = 'text-red-500';
+                        analysisEl.classList.add('hidden');
+                        analyzeBtn.classList.add('hidden');
+                        return;
+                    }
+
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'text-green-400';
+
+                    if (data.analysis) {
+                        analysisEl.classList.remove('hidden');
+                        const a = data.analysis;
+                        if (a.status === 'running') {
+                            analysisEl.textContent = `Analysis running — ${a.processed ?? 0} / ${a.total ?? '?'} tracks processed.`;
+                            analyzeBtn.classList.add('hidden');
+                        } else if (a.status === 'completed') {
+                            analysisEl.textContent = `Last analysis completed. ${a.total ?? ''} tracks indexed.`;
+                            analyzeBtn.textContent = 'Re-run Analysis';
+                            analyzeBtn.classList.remove('hidden');
+                        } else {
+                            analysisEl.textContent = `Analysis status: ${a.status}`;
+                            analyzeBtn.textContent = 'Start Analysis';
+                            analyzeBtn.classList.remove('hidden');
+                        }
+                    } else {
+                        analysisEl.classList.add('hidden');
+                        analyzeBtn.textContent = 'Start Analysis';
+                        analyzeBtn.classList.remove('hidden');
+                    }
+                } catch (error) {
+                    console.error('Error checking audio similarity status:', error);
+                }
+            }
+
+            document.getElementById('audio-similarity-analyze').addEventListener('click', async () => {
+                const analyzeBtn = document.getElementById('audio-similarity-analyze');
+                const statusEl = document.getElementById('audio-similarity-status');
+                const analysisEl = document.getElementById('audio-similarity-analysis');
+
+                analyzeBtn.disabled = true;
+                analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+                try {
+                    const response = await fetch('/api/audio-similarity/start-analysis', { method: 'POST' });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        analysisEl.textContent = 'Analysis started…';
+                        analysisEl.classList.remove('hidden');
+                        analyzeBtn.classList.add('hidden');
+                        // Poll for updates
+                        setTimeout(checkAudioSimilarity, 3000);
+                    } else {
+                        alert(`Failed to start analysis: ${data.error || 'Unknown error'}`);
+                        analyzeBtn.disabled = false;
+                        analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }
+                } catch (error) {
+                    console.error('Error starting analysis:', error);
+                    alert('Error starting analysis.');
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            });
+
             checkUserPermissions();
             checkStatus();
             loadApiKeys();
+            checkAudioSimilarity();
 
             // Load transcoding profiles for all users
             fetch('/api/users')

@@ -124,7 +124,7 @@ api.get('/public-stream/:shareId/:itemId', async (c: Context) => {
     const ffmpegPath = config.transcoding?.ffmpeg_path;
 
     if (transcodingEnabled && ffmpegPath) {
-        logger.debug(`Secure public stream for share ${shareId}, item ${itemId}: Transcoding to Opus.`);
+        logger.debug(`Secure public stream for share ${shareId}, item ${itemId}: Transcoding to mp3.`);
         const lowQualityMp3Bitrate = '128k';
         const format = 'mp3';
         const contentType = 'audio/mpeg';
@@ -197,19 +197,65 @@ api.get('/public-stream/:shareId/:itemId', async (c: Context) => {
         } else c.status(200);
 
         await file.seek(start, Deno.SeekMode.Start);
+
+        let bytesRemaining = contentLength;
+        let closed = false;
+        const closeFile = () => {
+            if (closed) return;
+            closed = true;
+            try {
+                file.close();
+            } catch {
+                // already closed, ignore
+            }
+        };
+
         const readable = new ReadableStream({
             async pull(controller) {
-                const buffer = new Uint8Array(64 * 1024);
-                const bytesRead = await file.read(buffer);
-                if (bytesRead === null || bytesRead === 0) {
-                    controller.close();
-                    file.close();
-                } else {
+                if (closed) return;
+
+                if (bytesRemaining <= 0) {
+                    try {
+                        controller.close();
+                    } catch {
+                        // already closed/cancelled, ignore
+                    }
+                    return closeFile();
+                }
+
+                const chunkSize = Math.min(64 * 1024, bytesRemaining);
+                const buffer = new Uint8Array(chunkSize);
+                try {
+                    const bytesRead = await file.read(buffer);
+
+                    // The request may have been cancelled while we were awaiting the read
+                    if (closed) return;
+
+                    if (bytesRead === null || bytesRead === 0) {
+                        try {
+                            controller.close();
+                        } catch {
+                            // already closed/cancelled, ignore
+                        }
+                        return closeFile();
+                    }
+
+                    bytesRemaining -= bytesRead;
                     controller.enqueue(buffer.subarray(0, bytesRead));
+                } catch (error) {
+                    if (!closed) {
+                        logger.error(`Error reading public stream file ${originalFilePath}: ${error}`);
+                        try {
+                            controller.error(error);
+                        } catch {
+                            // already closed/cancelled, ignore
+                        }
+                    }
+                    return closeFile();
                 }
             },
             cancel() {
-                file.close();
+                return closeFile();
             },
         });
         return c.body(readable);
@@ -455,6 +501,7 @@ api.post('/users', async (c: Context) => {
     let { username, password } = await c.req.json();
 
     if (!username || !password) return c.json({ error: 'Missing fields' }, 400);
+    if (/[\/\\]|\.\./.test(username)) return c.json({ error: 'Invalid username' }, 400);
     const exists = await getUserByUsername(username);
     if (exists) return c.json({ error: 'User already exists!' }, 400);
 
@@ -503,6 +550,7 @@ api.put('/users/:username', async (c: Context) => {
     // Parse request body
     const updatedData = await c.req.json();
     const newUsername = updatedData.username?.toLowerCase() || oldUsername.toLowerCase();
+    if (updatedData.username && /[\/\\]|\.\./.test(updatedData.username)) return c.json({ error: 'Invalid username' }, 400);
 
     if (updatedData.password) existingUser.backend.password = await encryptForTokenAuth(updatedData.password);
     if (oldUsername.toLowerCase() !== newUsername) {
@@ -540,7 +588,7 @@ api.delete('/users/:username', async (c: Context) => {
     if (!existingUser) return c.json({ error: 'User not found' }, 404);
 
     // Delete everything related to the user
-    await deleteUserReferences(existingUser.backend.id);
+    await deleteUserReferences(existingUser.backend.id, existingUser.subsonic.username);
 
     return c.json({ message: 'User and all related data deleted' });
 });
@@ -891,6 +939,130 @@ api.post('/audio-similarity/start-analysis', async (c: Context) => {
     }
 
     return c.json({ message: 'Analysis started', task_id: taskId });
+});
+
+api.get('/avatar/:username', async (c: Context) => {
+    const { username } = c.req.param();
+    const userEntry = await getUserByUsername(username);
+    if (!userEntry) return c.json({ error: 'User not found' }, 404);
+
+    const avatarsDir = path.join(config.data_folder, 'avatars');
+    const safeName = userEntry.backend.username;
+    for (const ext of ['jpg', 'png', 'gif', 'webp']) {
+        const avatarPath = path.join(avatarsDir, `${safeName}.${ext}`);
+        try {
+            const fileData = await Deno.readFile(avatarPath);
+            let contentType = 'image/jpeg';
+            if (ext === 'png') contentType = 'image/png';
+            else if (ext === 'gif') contentType = 'image/gif';
+            else if (ext === 'webp') contentType = 'image/webp';
+
+            c.header('Content-Type', contentType);
+            c.header('Cache-Control', 'public, max-age=3600');
+            return c.body(fileData);
+        } catch {
+            // File doesn't exist, try next extension
+        }
+    }
+
+    return c.json({ error: 'Avatar not found' }, 404);
+});
+
+api.post('/avatar/:username', async (c: Context) => {
+    const sessionUser = c.get('user') as { user: SubsonicUser; exp: number };
+    const username = c.req.param('username')!;
+    if (!sessionUser.user.adminRole && sessionUser.user.username !== username) {
+        return c.json({ error: 'Unauthorized' }, 403);
+    } const userEntry = await getUserByUsername(username);
+    if (!userEntry) return c.json({ error: 'User not found' }, 404);
+
+    const contentType = c.req.header('Content-Type') || '';
+    if (!contentType.startsWith('multipart/form-data') && !contentType.startsWith('image/')) {
+        return c.json({ error: 'Invalid content type' }, 400);
+    }
+
+    let imageData: Uint8Array;
+    let ext = 'jpg';
+
+    if (contentType.startsWith('multipart/form-data')) {
+        const formData = await c.req.formData();
+        const file = formData.get('avatar');
+        if (!file || !(file instanceof File)) return c.json({ error: 'No avatar file provided' }, 400);
+        const mime = file.type;
+        if (!mime.startsWith('image/')) return c.json({ error: 'File is not an image' }, 400);
+        if (mime.includes('png')) ext = 'png';
+        else if (mime.includes('gif')) ext = 'gif';
+        else if (mime.includes('webp')) ext = 'webp';
+        imageData = new Uint8Array(await file.arrayBuffer());
+    } else {
+        imageData = new Uint8Array(await c.req.arrayBuffer());
+        if (contentType.includes('png')) ext = 'png';
+        else if (contentType.includes('gif')) ext = 'gif';
+        else if (contentType.includes('webp')) ext = 'webp';
+    }
+
+    if (imageData.length > 2 * 1024 * 1024) {
+        return c.json({ error: 'Avatar file too large (max 2MB)' }, 400);
+    }
+
+    const avatarsDir = path.join(config.data_folder, 'avatars');
+    await ensureDir(avatarsDir);
+
+    const safeName = userEntry.backend.username;
+    for (const oldExt of ['jpg', 'png', 'gif', 'webp']) {
+        try {
+            await Deno.remove(path.join(avatarsDir, `${safeName}.${oldExt}`));
+        } catch {
+            // File doesn't exist, fine
+        }
+    }
+
+    const avatarPath = path.join(avatarsDir, `${safeName}.${ext}`);
+    await Deno.writeFile(avatarPath, imageData);
+
+    const userParse = UserSchema.safeParse(userEntry);
+    if (userParse.success) {
+        const user = userParse.data;
+        user.subsonic.avatarLastChanged = new Date();
+        await database.set(['users', user.backend.id], user);
+    }
+
+    logger.info(`Avatar uploaded for user: ${username}`);
+    return c.json({ success: true, message: 'Avatar uploaded' });
+});
+
+api.delete('/avatar/:username', async (c: Context) => {
+    const sessionUser = c.get('user') as { user: SubsonicUser; exp: number };
+    const username = c.req.param('username')!;
+    if (!sessionUser.user.adminRole && sessionUser.user.username !== username) {
+        return c.json({ error: 'Unauthorized' }, 403);
+    } const userEntry = await getUserByUsername(username);
+    if (!userEntry) return c.json({ error: 'User not found' }, 404);
+
+    const avatarsDir = path.join(config.data_folder, 'avatars');
+    let removed = false;
+
+    const safeName = userEntry.backend.username;
+    for (const ext of ['jpg', 'png', 'gif', 'webp']) {
+        try {
+            await Deno.remove(path.join(avatarsDir, `${safeName}.${ext}`));
+            removed = true;
+        } catch {
+            // File doesn't exist
+        }
+    }
+
+    if (removed) {
+        const userParse = UserSchema.safeParse(userEntry);
+        if (userParse.success) {
+            const user = userParse.data;
+            user.subsonic.avatarLastChanged = new Date();
+            await database.set(['users', user.backend.id], user);
+        }
+    }
+
+    logger.info(`Avatar deleted for user: ${username}`);
+    return c.json({ success: true, message: 'Avatar deleted' });
 });
 
 export default api;
