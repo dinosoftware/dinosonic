@@ -46,59 +46,59 @@ steps:
       - |
         # Forgejo/Codeberg Payload
         jq -n \
-          --arg tag "v${VERSION}" \
-          --arg name "v${VERSION}" \
-          --arg target "${CI_COMMIT_SHA}" \
+          --arg tag "v$VERSION" \
+          --arg name "v$VERSION" \
+          --arg target "$CI_COMMIT_SHA" \
           '{tag_name: $$tag, name: $$name, target: $$target, draft: true}' > payload.json
 
         # GitHub Payload
         jq -n \
-          --arg tag "v${VERSION}" \
-          --arg name "v${VERSION}" \
-          --arg target "${CI_COMMIT_SHA}" \
+          --arg tag "v$VERSION" \
+          --arg name "v$VERSION" \
+          --arg target "$CI_COMMIT_SHA" \
           '{tag_name: $$tag, name: $$name, target_commitish: $$target, draft: true}' > github_payload.json
 
         # FORGEJO
         echo "Creating draft release on Forgejo..."
-        RESP_FJ=$$(curl -s -w "\n%{http_code}" -X POST \
+        RESP_FJ=$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $FORGEJO_TOKEN" \
           -H "Content-Type: application/json" \
           -d @payload.json \
           "https://git.fuge.dev/api/v1/repos/${CI_REPO}/releases")
 
-        HTTP_CODE=$$(echo "$$RESP_FJ" | tail -1)
-        RESP_BODY=$$(echo "$$RESP_FJ" | sed '$$d')
-        FJ_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+        HTTP_CODE=$(echo "$RESP_FJ" | tail -1)
+        RESP_BODY=$(echo "$RESP_FJ" | sed '$d')
+        FJ_ID=$(echo "$RESP_BODY" | jq -r '.id')
 
-        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$FJ_ID" = "null" ]; then
-          echo "FORGEJO ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+        if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] || [ "$FJ_ID" = "null" ]; then
+          echo "FORGEJO ERROR (HTTP $HTTP_CODE): $RESP_BODY"
           exit 1
         fi
-        echo "$$FJ_ID" > .forgejo_id
-        echo "Forgejo Release ID: $$FJ_ID"
+        echo "$FJ_ID" > .forgejo_id
+        echo "Forgejo Release ID: $FJ_ID"
 
         # CODEBERG
         echo "Creating draft release on Codeberg..."
-        RESP_CB=$$(curl -s -w "\n%{http_code}" -X POST \
+        RESP_CB=$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $CODEBERG_TOKEN" \
           -H "Content-Type: application/json" \
           -d @payload.json \
           "https://codeberg.org/api/v1/repos/${CI_REPO}/releases")
 
-        HTTP_CODE=$$(echo "$$RESP_CB" | tail -1)
-        RESP_BODY=$$(echo "$$RESP_CB" | sed '$$d')
-        CB_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+        HTTP_CODE=$(echo "$RESP_CB" | tail -1)
+        RESP_BODY=$(echo "$RESP_CB" | sed '$d')
+        CB_ID=$(echo "$RESP_BODY" | jq -r '.id')
 
-        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$CB_ID" = "null" ]; then
-          echo "CODEBERG ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+        if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] || [ "$CB_ID" = "null" ]; then
+          echo "CODEBERG ERROR (HTTP $HTTP_CODE): $RESP_BODY"
           exit 1
         fi
-        echo "$$CB_ID" > .codeberg_id
-        echo "Codeberg Release ID: $$CB_ID"
+        echo "$CB_ID" > .codeberg_id
+        echo "Codeberg Release ID: $CB_ID"
 
         # GITHUB
         echo "Creating draft release on GitHub..."
-        RESP_GH=$$(curl -s -w "\n%{http_code}" -X POST \
+        RESP_GH=$(curl -s -w "\n%{http_code}" -X POST \
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
           -A "Woodpecker-CI" \
@@ -106,16 +106,16 @@ steps:
           -d @github_payload.json \
           "https://api.github.com/repos/${CI_REPO}/releases")
 
-        HTTP_CODE=$$(echo "$$RESP_GH" | tail -1)
-        RESP_BODY=$$(echo "$$RESP_GH" | sed '$$d')
-        GH_ID=$$(echo "$$RESP_BODY" | jq -r '.id')
+        HTTP_CODE=$(echo "$RESP_GH" | tail -1)
+        RESP_BODY=$(echo "$RESP_GH" | sed '$d')
+        GH_ID=$(echo "$RESP_BODY" | jq -r '.id')
 
-        if [ "$$HTTP_CODE" -lt 200 ] || [ "$$HTTP_CODE" -ge 300 ] || [ "$$GH_ID" = "null" ]; then
-          echo "GITHUB ERROR (HTTP $$HTTP_CODE): $$RESP_BODY"
+        if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] || [ "$GH_ID" = "null" ]; then
+          echo "GITHUB ERROR (HTTP $HTTP_CODE): $RESP_BODY"
           exit 1
         fi
-        echo "$$GH_ID" > .github_id
-        echo "GitHub Release ID: $$GH_ID"
+        echo "$GH_ID" > .github_id
+        echo "GitHub Release ID: $GH_ID"
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
       CODEBERG_TOKEN: { from_secret: codeberg_token }
@@ -256,19 +256,19 @@ steps:
       evaluate: 'BUILD_DOCKER == "true"'
     commands:
       - |
-        REPO_LOWER=$$(echo "${CI_REPO}" | tr '[:upper:]' '[:lower:]')
+        REPO_LOWER=$(echo "$CI_REPO" | tr '[:upper:]' '[:lower:]')
 
         # GHCR Sync
         skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/$$REPO_LOWER:latest docker://ghcr.io/$$REPO_LOWER:latest
+          docker://git.fuge.dev/$REPO_LOWER:latest docker://ghcr.io/$REPO_LOWER:latest
         skopeo copy --all --dest-creds "dinosoftware:$GITHUB_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/$$REPO_LOWER:v${VERSION} docker://ghcr.io/$$REPO_LOWER:v${VERSION}
+          docker://git.fuge.dev/$REPO_LOWER:v$VERSION docker://ghcr.io/$REPO_LOWER:v$VERSION
 
         # Codeberg Sync
         skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/$$REPO_LOWER:latest docker://codeberg.org/$$REPO_LOWER:latest
+          docker://git.fuge.dev/$REPO_LOWER:latest docker://codeberg.org/$REPO_LOWER:latest
         skopeo copy --all --dest-creds "dinosoftware:$CODEBERG_TOKEN" --src-creds "dinosoftware:$FORGEJO_TOKEN" \
-          docker://git.fuge.dev/$$REPO_LOWER:v${VERSION} docker://codeberg.org/$$REPO_LOWER:v${VERSION}
+          docker://git.fuge.dev/$REPO_LOWER:v$VERSION docker://codeberg.org/$REPO_LOWER:v$VERSION
     environment:
       FORGEJO_TOKEN: { from_secret: forgejo_token }
       GITHUB_TOKEN: { from_secret: github_token }
