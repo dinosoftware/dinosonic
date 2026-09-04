@@ -240,8 +240,7 @@ steps:
     when:
       evaluate: 'BUILD_DOCKER == "true"'
     commands:
-      - echo "latest" > .tags
-      - echo "v$VERSION" >> .tags
+      - echo -n "latest,v$VERSION" > .tags
 
   docker-build-primary:
     image: woodpeckerci/plugin-docker-buildx
