@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 
 const SERVER_NAME = 'Dinosonic';
 const API_VERSION = '1.16.1';
-export const SERVER_VERSION = '0.8.0';
+export const SERVER_VERSION = '0.8.1';
 
 const CRASH_ON_DEPRECATED_DB_KEY = false;
 

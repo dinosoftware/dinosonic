@@ -152,6 +152,8 @@ services:
             # Optional Transcoding configuration
             # DINO_TRANSCODING_ENABLED: false
             # DINO_FFMPEG_PATH: ffmpeg
+            # DINO_LRCLIB_ENABLED: true
+            # DINO_MUSIXMATCH_ENABLED: true
             # Optional Audio Similarity (requires AudioMuse-AI)
             # DINO_AUDIO_SIMILARITY_ENABLED: true
             # DINO_AUDIOMUSE_URL: http://audiomuse:8000
@@ -183,6 +185,8 @@ services:
 | `DINO_LISTENBRAINZ_SCROBBLING`  | Enable ListenBrainz scrobbling (`true`/`false`). Tokens set per-user in admin panel.       | `false`         |
 | `DINO_TRANSCODING_ENABLED`      | Enable FFmpeg-based transcoding for streaming and cover art resizing (`true`/`false`).     | `false`         |
 | `DINO_FFMPEG_PATH`              | Path to `ffmpeg` binary.                                                                   | `ffmpeg`        |
+| `DINO_LRCLIB_ENABLED`           | Enable LRCLIB lyrics fetching (`true`/`false`).                                            | `true`          |
+| `DINO_MUSIXMATCH_ENABLED`       | Enable Musixmatch lyrics fetching (`true`/`false`).                                        | `true`          |
 | `DINO_AUDIO_SIMILARITY_ENABLED` | Enable audio-based similarity via AudioMuse-AI (`true`/`false`).                           | `false`         |
 | `DINO_AUDIOMUSE_URL`            | AudioMuse-AI server URL. \*Required if `DINO_AUDIO_SIMILARITY_ENABLED` is true.            | _None\*_        |
 | `DINO_AUDIOMUSE_API_TOKEN`      | AudioMuse-AI API token (Bearer auth). \*Required when AudioMuse auth is enabled.           | _None\*_        |
@@ -264,6 +268,10 @@ genre_separators = [";", ","]
 enabled = false
 ffmpeg_path = "ffmpeg" # Path to ffmpeg binary
 
+[lyrics]
+lrclib_enabled = true # Fetch lyrics from LRCLIB
+musixmatch_enabled = true # Fetch lyrics from Musixmatch
+
 [last_fm]
 enabled = false # For metadata fetching
 enable_scrobbling = false # For scrobbling and loved track sync (implies 'enabled' is true)
@@ -308,6 +316,13 @@ api_token = "your_audiomuse_api_token" # Required when AudioMuse auth is enabled
 | ------------- | ------- | -------- | ---------------------------------------------------------- |
 | `enabled`     | boolean | `false`  | Whether FFmpeg-based transcoding for streaming is enabled. |
 | `ffmpeg_path` | string  | `ffmpeg` | Path to the FFmpeg executable.                             |
+
+#### Lyrics Options (`[lyrics]`)
+
+| Option               | Type    | Default | Description                        |
+| -------------------- | ------- | ------- | ---------------------------------- |
+| `lrclib_enabled`     | boolean | `true`  | Enable LRCLIB lyrics fetching.     |
+| `musixmatch_enabled` | boolean | `true`  | Enable Musixmatch lyrics fetching. |
 
 #### Last.fm Options (`[last_fm]`)
 

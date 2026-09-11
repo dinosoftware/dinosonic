@@ -45,6 +45,11 @@ export const ConfigTranscodingOptionSchema = z.object({
     ffmpeg_path: z.string().default('ffmpeg'),
 });
 
+export const ConfigLyricsOptionSchema = z.object({
+    lrclib_enabled: z.boolean().default(true),
+    musixmatch_enabled: z.boolean().default(true),
+});
+
 export const ConfigLastFMOptionSchema = z.object({
     enabled: z.boolean().default(false),
     enable_scrobbling: z.boolean().default(false),
@@ -84,6 +89,7 @@ export const ConfigSchema = z.object({
     data_folder: z.string(),
     ui_folder: z.string().optional(),
     transcoding: ConfigTranscodingOptionSchema.default({ enabled: true, ffmpeg_path: 'ffmpeg' }),
+    lyrics: ConfigLyricsOptionSchema.default({ lrclib_enabled: true, musixmatch_enabled: true }),
     audio_similarity: ConfigAudioSimilarityOptionSchema.default({ enabled: false }),
     last_fm: ConfigLastFMOptionSchema.optional(),
     listenbrainz: ConfigListenBrainzOptionSchema.optional(),
@@ -379,6 +385,7 @@ export type CoverArt = z.infer<typeof CoverArtSchema>;
 export type TranscodingProfile = z.infer<typeof TranscodingProfileSchema>;
 export type ConfigAudioSimilarityOption = z.infer<typeof ConfigAudioSimilarityOptionSchema>;
 export type ConfigTranscodingOption = z.infer<typeof ConfigTranscodingOptionSchema>;
+export type ConfigLyricsOption = z.infer<typeof ConfigLyricsOptionSchema>;
 export type ConfigLastFMOption = z.infer<typeof ConfigLastFMOptionSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
 export type ReplayGain = z.infer<typeof ReplayGainSchema>;

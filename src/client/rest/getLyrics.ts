@@ -69,6 +69,8 @@ function convertToLRC(lyrics: StructuredLyrics[]) {
 async function fetchLyrics(trackName: string, artistName: string): Promise<string | null> {
     const artistNameGet = artistName.split(separatorsToRegex(config.artist_separators))[0];
 
+    if (!config.lyrics.lrclib_enabled) return null;
+
     // Get in LRCLIB
     const lrclibGetUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(trackName)}&artist_name=${encodeURIComponent(artistNameGet)}`;
 

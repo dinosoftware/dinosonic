@@ -1,5 +1,5 @@
 import { Context, Hono } from '@hono/hono';
-import { createResponse, database, getField, logger, validateAuth } from '../../util.ts';
+import { config, createResponse, database, getField, logger, validateAuth } from '../../util.ts';
 import { Song } from '../../zod.ts';
 import * as path from '@std/path';
 import { ensureDir } from '@std/fs/ensure-dir';
@@ -31,10 +31,15 @@ async function handlegetLyricsBySongId(c: Context) {
 
     const cacheLyricsDir = path.join(globalThis.__tmpDir, 'cache', 'lyrics');
     await ensureDir(cacheLyricsDir);
-    const cachedLyricsPath = path.join(cacheLyricsDir, `${id}.lrc`);
+    const remoteLyricsEnabled = config.lyrics.lrclib_enabled || config.lyrics.musixmatch_enabled;
+    const enabledProviders = [
+        config.lyrics.lrclib_enabled ? 'lrclib' : '',
+        config.lyrics.musixmatch_enabled ? 'musixmatch' : '',
+    ].filter(Boolean).join('-');
+    const cachedLyricsPath = path.join(cacheLyricsDir, `${id}.${enabledProviders}.lrc`);
     let lyrics: string | null = null;
 
-    if (await exists(cachedLyricsPath)) {
+    if (remoteLyricsEnabled && await exists(cachedLyricsPath)) {
         try {
             logger.debug(`Serving cached lyrics for song ID: ${id}`);
             lyrics = await Deno.readTextFile(cachedLyricsPath);
@@ -43,7 +48,7 @@ async function handlegetLyricsBySongId(c: Context) {
         }
     }
 
-    if (!lyrics) {
+    if (!lyrics && remoteLyricsEnabled) {
         lyrics = await fetchLyrics(
             track.subsonic.title,
             track.subsonic.artists.map((artists) => artists.name).join(', '),
@@ -150,49 +155,49 @@ async function fetchLyrics(trackName: string, artistNames: string, artistName: s
     const fullArtistString = artistNames.trim();
     const mainArtist = artistName.trim();
 
-    logger.debug(`Attempting to fetch lyrics with full artist string: "${fullArtistString}"`);
-    let lyrics = await _searchLrclib(fullArtistString, trackName, albumName, duration);
-    if (lyrics) {
-        return lyrics;
-    }
+    let lyrics: string | null = null;
+    if (config.lyrics.lrclib_enabled) {
+        logger.debug(`Attempting to fetch lyrics with full artist string: "${fullArtistString}"`);
+        lyrics = await _searchLrclib(fullArtistString, trackName, albumName, duration);
+        if (lyrics) return lyrics;
 
-    if (mainArtist.toLowerCase() !== fullArtistString.toLowerCase()) {
-        logger.debug(`Fetching with full artist string failed, retrying with main artist: "${mainArtist}"`);
-        lyrics = await _searchLrclib(mainArtist, trackName, albumName, duration);
-        if (lyrics) {
-            return lyrics;
+        if (mainArtist.toLowerCase() !== fullArtistString.toLowerCase()) {
+            logger.debug(`Fetching with full artist string failed, retrying with main artist: "${mainArtist}"`);
+            lyrics = await _searchLrclib(mainArtist, trackName, albumName, duration);
+            if (lyrics) return lyrics;
         }
     }
 
-    // MusixMatch is always last because even with the
-    // duration defined, Lyrics can still be a little bit offset.
-    try {
-        // Trying with Multi artists
-        let lyrics = await musixmatch.getLyrics({
-            title: trackName,
-            artist: fullArtistString,
-            album: albumName,
-            duration: duration,
-        });
+    if (config.lyrics.musixmatch_enabled) {
+        // MusixMatch is always last because even with the duration defined, lyrics can still be a little bit offset.
+        try {
+            // Trying with Multi artists
+            let lyrics = await musixmatch.getLyrics({
+                title: trackName,
+                artist: fullArtistString,
+                album: albumName,
+                duration: duration,
+            });
 
-        if (lyrics) {
-            logger.debug(`Successfully fetched lyrics from Musixmatch with full artist string.`);
-            return lyrics;
-        }
-        // Fallback to one artist
-        lyrics = await musixmatch.getLyrics({
-            title: trackName,
-            artist: mainArtist,
-            album: albumName,
-            duration: duration,
-        });
+            if (lyrics) {
+                logger.debug(`Successfully fetched lyrics from Musixmatch with full artist string.`);
+                return lyrics;
+            }
+            // Fallback to one artist
+            lyrics = await musixmatch.getLyrics({
+                title: trackName,
+                artist: mainArtist,
+                album: albumName,
+                duration: duration,
+            });
 
-        if (lyrics) {
-            logger.debug(`Successfully fetched lyrics from Musixmatch with single artist string.`);
-            return lyrics;
+            if (lyrics) {
+                logger.debug(`Successfully fetched lyrics from Musixmatch with single artist string.`);
+                return lyrics;
+            }
+        } catch (error) {
+            logger.error(`An error occurred while fetching lyrics from Musixmatch: ${error}`);
         }
-    } catch (error) {
-        logger.error(`An error occurred while fetching lyrics from Musixmatch: ${error}`);
     }
 
     logger.debug(`No lyrics found for "${trackName}" by "${artistName}" after all attempts.`);

@@ -15,7 +15,17 @@ import {
 } from './zod.ts';
 import { scanMediaDirectories } from './MediaScanner.ts';
 import { parseArgs } from '@std/cli';
-import { assetPath, ensureAdminUserExistsHybrid, initEncryptionKey, logger, parseTimeToMs, registerTempDirCleanup, SERVER_VERSION, setConstants, setupLogger } from './util.ts';
+import {
+    assetPath,
+    ensureAdminUserExistsHybrid,
+    initEncryptionKey,
+    logger,
+    parseTimeToMs,
+    registerTempDirCleanup,
+    SERVER_VERSION,
+    setConstants,
+    setupLogger,
+} from './util.ts';
 import restRoutes from './client/rest/index.ts';
 import apiRoutes from './client/api/index.ts';
 import { Context, Hono, Next } from '@hono/hono';
@@ -93,6 +103,8 @@ if (configFile) {
         listenbrainz_scrobbling: Deno.env.get('DINO_LISTENBRAINZ_SCROBBLING'),
         transcoding_enabled: Deno.env.get('DINO_TRANSCODING_ENABLED'),
         ffmpeg_path: Deno.env.get('DINO_FFMPEG_PATH'),
+        lrclib_enabled: Deno.env.get('DINO_LRCLIB_ENABLED'),
+        musixmatch_enabled: Deno.env.get('DINO_MUSIXMATCH_ENABLED'),
         audio_similarity_enabled: Deno.env.get('DINO_AUDIO_SIMILARITY_ENABLED'),
         audiomuse_url: Deno.env.get('DINO_AUDIOMUSE_URL'),
         audiomuse_api_token: Deno.env.get('DINO_AUDIOMUSE_API_TOKEN'),
@@ -114,6 +126,13 @@ if (configFile) {
         default_admin_password: envVars.default_admin_password,
         encryption_key: envVars.encryption_key,
     };
+
+    if (envVars.lrclib_enabled !== undefined || envVars.musixmatch_enabled !== undefined) {
+        conf.lyrics = {
+            lrclib_enabled: envVars.lrclib_enabled !== 'false',
+            musixmatch_enabled: envVars.musixmatch_enabled !== 'false',
+        };
+    }
 
     if (envVars.lastfm_enabled || envVars.lastfm_scrobbling) {
         conf.last_fm = {
@@ -204,7 +223,6 @@ async function cleanupNowPlaying() {
 
 setInterval(cleanupNowPlaying, 60 * 1000);
 cleanupNowPlaying();
-
 
 setInterval(function cleanupShareCache() {
     const now = Date.now();
@@ -414,7 +432,7 @@ app.get('/share/:shareId', async (c: Context) => {
             }
 
             const cacheDir = path.join(config.data_folder, 'cache', 'cover_shares');
-            await Deno.mkdir(cacheDir, { recursive: true }).catch(() => { });
+            await Deno.mkdir(cacheDir, { recursive: true }).catch(() => {});
 
             const ext = cover.mimeType.split('/')[1] || 'jpg';
             const cachedPath = path.join(cacheDir, `${share.itemId}_${size}.${ext}`);
@@ -469,7 +487,8 @@ app.get('/share/:shareId', async (c: Context) => {
             item = item as Album;
             metaTitle = `${item.subsonic.name || 'Album'} by ${item.subsonic.artist || 'Unknown Artist'}`;
             metaDescription = share.description ||
-                `Check out the album "${item.subsonic.name}" by ${item.subsonic.artist || 'Unknown Artist'
+                `Check out the album "${item.subsonic.name}" by ${
+                    item.subsonic.artist || 'Unknown Artist'
                 } on Dinosonic. Shared by ${ownerUsername}.`;
             if (item.subsonic.coverArt) metaImageUrl = `${baseUrl}/api/public-cover/${item.subsonic.coverArt}?size=600`;
             metaOgType = 'music.album';

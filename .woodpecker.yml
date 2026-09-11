@@ -47,14 +47,14 @@ steps:
         # Forgejo/Codeberg Payload
         jq -n \
           --arg tag "v$VERSION" \
-          --arg name "v$VERSION" \
+          --arg name "Dinosonic release v$VERSION" \
           --arg target "$CI_COMMIT_SHA" \
           '{tag_name: $$tag, name: $$name, target: $$target, draft: true}' > payload.json
 
         # GitHub Payload
         jq -n \
           --arg tag "v$VERSION" \
-          --arg name "v$VERSION" \
+          --arg name "Dinosonic release v$VERSION" \
           --arg target "$CI_COMMIT_SHA" \
           '{tag_name: $$tag, name: $$name, target_commitish: $$target, draft: true}' > github_payload.json
 
